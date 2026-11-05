@@ -255,7 +255,8 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   font: inherit; font-size: 10.5pt; font-weight: 400; color: var(--ink);
   border: 1px solid #d3d3d3; border-radius: 6px; padding: 9px 10px; background: #fff; width: 100%;
 }
-.respond-form input:focus, .respond-form textarea:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(61, 133, 198, 0.18); }
+.respond-form input:not([type='checkbox']):focus, .respond-form textarea:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(61, 133, 198, 0.18); }
+.respond-form input[type='checkbox']:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .respond-form textarea { resize: vertical; }
 .respond-form .rf-wide { margin-top: 4mm; }
 .respond-form label.rf-check { flex-direction: row; align-items: flex-start; gap: 3mm; margin-top: 5mm; font-weight: 400; font-size: 10pt; cursor: pointer; }

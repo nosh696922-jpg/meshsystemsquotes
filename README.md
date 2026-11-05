@@ -93,6 +93,8 @@ PDF directly using Edge or Chrome.
   area with one price per area.
 - **Two people** – if you both edit the same quote at once, the second person to
   save is warned and can load the other’s changes or keep their own.
+- **Look** – styled like the Mesh website, with a light and a dark mode (the
+  light switch, top right). Animations switch off on devices set to reduce motion.
 
 ## Where things are
 
@@ -110,6 +112,7 @@ PDF directly using Edge or Chrome.
 | `lib/pdf.js` | One-click PDF via Edge/Chrome (local only) |
 | `public/app.js`, `public/styles.css` | The quoting app |
 | `public/shared/calc.js` | Pricing maths, shared by app and proposal |
+| `public/shared/mesh-nodes.js` | The moving nodes at the top of each page and on the sign-in page |
 
 ## Adding another manufacturer later
 
@@ -128,6 +131,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v3-before-2-pages` | Lighter, simpler design, still with a full cover page |
 | `v3` | Lighter, simpler proposal and PDF design (no dark panels), printing on fewer pages: the cover details sit on page 1, with an optional separate cover page |
 | `v3.1` | Adds “Start again from 0001” in Settings, to reset quote numbers (and optionally delete all quotes) after testing |
+| `v3.2` | The quoting app restyled to match the Mesh website (navy header, page tops with moving nodes, Inter and Poppins), smoother light/dark switching and animations throughout, and no box around clicked tick boxes |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s

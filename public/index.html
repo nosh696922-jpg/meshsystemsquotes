@@ -16,14 +16,20 @@
     })();
   </script>
   <link rel="icon" href="/img/favicon.png">
+  <!-- Load the fonts straight away, so text doesn't jump when they arrive. -->
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/poppins-500.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/poppins-600.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div id="app">
-    <div class="boot">Loading…</div>
+    <!-- Shown while the app starts, so the header doesn't flash in. -->
+    <header class="app-header"><span class="brand"><img src="/img/mesh-logo-white.png" alt="Mesh"><span>Quotes</span></span></header>
   </div>
   <script src="/vendor/vue.global.prod.js"></script>
   <script src="/shared/calc.js"></script>
+  <script src="/shared/mesh-nodes.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

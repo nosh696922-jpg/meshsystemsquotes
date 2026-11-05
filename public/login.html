@@ -14,18 +14,36 @@
     })();
   </script>
   <link rel="icon" href="/img/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/poppins-600.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
   <style>
-    html, body { background: var(--header-bg); }
-    body { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
-    .light-switch { position: fixed; top: 10px; right: 12px; }
-    .signin { width: 100%; max-width: 380px; }
-    .signin .logo { display: block; height: 34px; margin: 0 auto 28px; }
-    .signin .card { padding: 28px; }
-    .signin h1 { font-size: 20px; margin-bottom: 4px; }
-    .signin p { margin: 0 0 18px; }
-    .signin label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 500; }
-    .signin .btn { width: 100%; margin-top: 16px; }
+    /* The same blue glow and moving nodes as the page tops in the app:
+       a soft blue wash in light mode, deep navy in dark mode. */
+    html { background: var(--bg); }
+    body {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px;
+      background:
+        radial-gradient(900px 520px at 85% 0%, var(--band-glow), transparent 60%),
+        linear-gradient(180deg, var(--band-top) 0%, var(--band-top) 30%, var(--bg) 100%);
+    }
+    .login-mesh {
+      position: fixed; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none;
+      -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 95%);
+      mask-image: linear-gradient(180deg, #000 30%, transparent 95%);
+    }
+    .light-switch { position: fixed; top: 10px; right: 12px; z-index: 2; }
+    .signin { position: relative; z-index: 1; width: 100%; max-width: 400px; }
+    .signin .logo { display: block; height: 36px; margin: 0 auto 30px; }
+    :root[data-theme='dark'] .signin .logo.for-light, :root:not([data-theme='dark']) .signin .logo.for-dark { display: none; }
+    .signin .card { padding: 32px; border-radius: 22px; box-shadow: 0 1px 2px rgba(13, 20, 32, 0.05), 0 24px 60px rgba(13, 20, 32, 0.12); }
+    :root[data-theme='dark'] .signin .card { border-color: transparent; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); }
+    .signin .eyebrow { margin-bottom: 8px; }
+    .signin h1 { font-size: 26px; margin-bottom: 6px; }
+    .signin p.muted { margin: 0 0 20px; font-size: 13.5px; }
+    .signin label { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+    .signin input { min-height: 46px; }
+    .signin .btn { width: 100%; margin-top: 18px; }
     .signin .error { color: var(--red); font-size: 13px; margin-top: 12px; min-height: 1.2em; }
   </style>
 </head>
@@ -33,9 +51,12 @@
   <button type="button" class="light-switch" id="light-switch" role="switch" aria-label="Light mode">
     <span class="ls-plate" aria-hidden="true"><span class="ls-rocker"></span></span>
   </button>
+  <canvas class="login-mesh" id="mesh" aria-hidden="true"></canvas>
   <main class="signin">
-    <img class="logo" src="/img/mesh-logo-white.png" alt="Mesh">
+    <img class="logo for-light" src="/img/mesh-logo-dark.png" alt="Mesh">
+    <img class="logo for-dark" src="/img/mesh-logo-white.png" alt="Mesh">
     <form class="card" id="form">
+      <p class="eyebrow">Mesh Quotes</p>
       <h1>Sign in</h1>
       <p class="muted sm">Enter the team password to open Mesh Quotes.</p>
       <label>Password<input type="password" id="password" autocomplete="current-password" required autofocus></label>
@@ -43,7 +64,10 @@
       <div class="error" id="error" role="alert"></div>
     </form>
   </main>
+  <script src="/shared/mesh-nodes.js"></script>
   <script>
+    if (window.MeshNodes) MeshNodes.attach(document.getElementById('mesh'));
+
     // Light switch (same as in the app, remembered on this device).
     const lightSwitch = document.getElementById('light-switch');
     function showSwitch() {
@@ -53,15 +77,31 @@
       lightSwitch.title = dark ? 'Turn the lights on (light mode)' : 'Turn the lights off (dark mode)';
     }
     lightSwitch.addEventListener('click', () => {
-      const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       const root = document.documentElement;
-      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        root.classList.add('theme-transition');
-        setTimeout(() => root.classList.remove('theme-transition'), 450);
-      }
-      root.setAttribute('data-theme', next);
+      const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      const set = () => { root.setAttribute('data-theme', next); showSwitch(); };
       try { localStorage.setItem('mesh.theme', next); } catch (e) {}
-      showSwitch();
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) return set();
+      if (document.startViewTransition) {
+        // The new mode spreads out in a circle from the switch, as in the app.
+        const box = lightSwitch.getBoundingClientRect();
+        const x = box.left + box.width / 2;
+        const y = box.top + box.height / 2;
+        const radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+        root.classList.add('theme-switching');
+        const vt = document.startViewTransition(set);
+        vt.ready.then(() => {
+          root.animate(
+            { clipPath: ['circle(0px at ' + x + 'px ' + y + 'px)', 'circle(' + radius + 'px at ' + x + 'px ' + y + 'px)'] },
+            { duration: 700, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', pseudoElement: '::view-transition-new(root)' }
+          );
+        }).catch(() => {});
+        vt.finished.finally(() => root.classList.remove('theme-switching'));
+        return;
+      }
+      root.classList.add('theme-transition');
+      setTimeout(() => root.classList.remove('theme-transition'), 550);
+      set();
     });
     showSwitch();
 

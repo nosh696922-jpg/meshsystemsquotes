@@ -201,14 +201,34 @@ function diffQuotes(before, after) {
 const THEME_KEY = 'mesh.theme';
 let themeTimer = null;
 
+// Flipping the switch: the new mode spreads out in a circle from the switch,
+// like light filling a room. The page is animated as one picture, so it stays
+// smooth on slow machines. Browsers without that feature fade each colour instead.
 function applyTheme(theme, animate) {
   const root = document.documentElement;
-  if (animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    root.classList.add('theme-transition');
-    clearTimeout(themeTimer);
-    themeTimer = setTimeout(() => root.classList.remove('theme-transition'), 450);
+  const set = () => root.setAttribute('data-theme', theme);
+  if (!animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return set();
+  if (document.startViewTransition) {
+    const sw = document.querySelector('.light-switch');
+    const box = sw ? sw.getBoundingClientRect() : { left: innerWidth, top: 0, width: 0, height: 0 };
+    const x = box.left + box.width / 2;
+    const y = box.top + box.height / 2;
+    const radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+    root.classList.add('theme-switching');
+    const vt = document.startViewTransition(set);
+    vt.ready.then(() => {
+      root.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+        { duration: 700, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', pseudoElement: '::view-transition-new(root)' },
+      );
+    }).catch(() => {});
+    vt.finished.finally(() => root.classList.remove('theme-switching'));
+    return;
   }
-  root.setAttribute('data-theme', theme);
+  root.classList.add('theme-transition');
+  clearTimeout(themeTimer);
+  themeTimer = setTimeout(() => root.classList.remove('theme-transition'), 550);
+  set();
 }
 
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
@@ -263,12 +283,13 @@ window.addEventListener('hashchange', () => {
 });
 
 function toast(msg, type = 'ok') {
-  const t = { id: uid(), msg, type };
+  const life = type === 'error' ? 6000 : 2800; // how long it stays, in ms
+  const t = { id: uid(), msg, type, life };
   state.toasts.push(t);
   setTimeout(() => {
     const i = state.toasts.indexOf(t);
     if (i >= 0) state.toasts.splice(i, 1);
-  }, type === 'error' ? 6000 : 2800);
+  }, life);
 }
 
 async function loadCatalogue(force = false) {
@@ -586,7 +607,7 @@ const ProductPicker = {
   template: `
   <Modal :title="'Add to ' + (sectionName || 'area')" wide @close="$emit('close')">
     <div class="picker">
-      <div class="tabs">
+      <div class="tabs" v-tab-ink>
         <button :class="{ active: tab === 'ubiquiti' }" @click="tab = 'ubiquiti'">Ubiquiti</button>
         <button :class="{ active: tab === 'custom' }" @click="tab = 'custom'">Our products</button>
         <button :class="{ active: tab === 'kits' }" @click="tab = 'kits'">Kits <span class="count" v-if="kitsLoaded">{{ kits.length }}</span></button>
@@ -768,7 +789,9 @@ const QuotesList = {
   template: `
   <div class="page">
     <div class="page-head">
+      <MeshBand />
       <div>
+        <p class="eyebrow">Proposals</p>
         <h1>Quotes</h1>
         <p class="muted">Build proposals from the Ubiquiti UK catalogue and your own products.</p>
       </div>
@@ -780,9 +803,9 @@ const QuotesList = {
     </div>
 
     <div class="stats" v-if="quotes.length">
-      <div class="stat"><span>Quotes</span><b>{{ quotes.length }}</b></div>
-      <div class="stat"><span>Sent, awaiting reply</span><b>{{ money(pipeline) }}</b><small>ex VAT</small></div>
-      <div class="stat"><span>Accepted</span><b>{{ money(won) }}</b><small>ex VAT</small></div>
+      <div class="stat"><span>Quotes</span><b><AnimatedNumber :value="quotes.length" from-zero /></b></div>
+      <div class="stat"><span>Sent, awaiting reply</span><b><AnimatedNumber :value="pipeline" money from-zero /></b><small>ex VAT</small></div>
+      <div class="stat"><span>Accepted</span><b><AnimatedNumber :value="won" money from-zero /></b><small>ex VAT</small></div>
     </div>
 
     <div class="toolbar-row" v-if="quotes.length">
@@ -794,7 +817,7 @@ const QuotesList = {
       <input class="search sm" type="search" v-model="search" placeholder="Search quotes">
     </div>
 
-    <div class="card" v-if="loading"><div class="empty">Loading…</div></div>
+    <div class="card" v-if="loading"><div class="empty loading">Loading…</div></div>
     <div class="card empty-state" v-else-if="!quotes.length">
       <div class="es-mark"></div>
       <h2>No quotes yet</h2>
@@ -804,7 +827,7 @@ const QuotesList = {
     <div class="card table-card" v-else>
       <table class="list">
         <thead><tr><th>Ref</th><th>Proposal</th><th>Prepared by</th><th>Status</th><th class="num">Total ex VAT</th><th>Updated</th><th></th></tr></thead>
-        <tbody>
+        <TransitionGroup tag="tbody" name="qrow">
           <tr v-for="q in filtered" :key="q.id" @click="open(q)" class="click">
             <td class="ref">{{ q.number }}</td>
             <td><div class="strong">{{ q.title }}</div><div class="muted sm">{{ q.client || 'No client yet' }} · {{ q.items }} line{{ q.items === 1 ? '' : 's' }}</div></td>
@@ -818,8 +841,8 @@ const QuotesList = {
               <button class="btn ghost sm danger" @click="remove(q)">Delete</button>
             </td>
           </tr>
-          <tr v-if="!filtered.length"><td colspan="7" class="empty">No quotes match.</td></tr>
-        </tbody>
+          <tr v-if="!filtered.length" key="none"><td colspan="7" class="empty">No quotes match.</td></tr>
+        </TransitionGroup>
       </table>
     </div>
   </div>`,
@@ -1262,9 +1285,10 @@ const QuoteEditor = {
   <div class="page editor" v-if="loadError">
     <div class="card empty-state"><h2>Could not open this quote</h2><p class="muted">{{ loadError }}</p><a class="btn" href="#/">Back to quotes</a></div>
   </div>
-  <div class="page editor" v-else-if="!quote"><div class="empty">Loading…</div></div>
+  <div class="page editor" v-else-if="!quote"><div class="empty loading">Loading…</div></div>
   <div class="page editor" v-else>
     <div class="editor-head">
+      <MeshBand />
       <a class="back" href="#/">&larr; Quotes</a>
       <div class="title-row">
         <span class="ref">{{ quote.number }}</span>
@@ -1297,7 +1321,7 @@ const QuoteEditor = {
       </div>
     </div>
 
-    <nav class="tabs editor-tabs">
+    <nav class="tabs editor-tabs" v-tab-ink>
       <button :class="{ active: tab === 'items' }" @click="tab = 'items'">Equipment &amp; labour</button>
       <button :class="{ active: tab === 'details' }" @click="tab = 'details'">Client &amp; details</button>
       <button :class="{ active: tab === 'text' }" @click="tab = 'text'">Proposal text</button>
@@ -1315,11 +1339,12 @@ const QuoteEditor = {
             <button class="link" @click="applyAllStorePrices">Update to current prices</button>
           </div>
 
+          <TransitionGroup name="area">
           <section class="card area-card" v-for="(section, si) in quote.sections" :key="section.id">
             <header class="area-head">
               <span class="area-mark"></span>
               <input class="section-name" v-model="section.name" placeholder="Area or system name, e.g. Ground floor, Network rack" aria-label="Area name">
-              <span class="area-sum">{{ money(totals.sections[si].total) }}</span>
+              <span class="area-sum"><AnimatedNumber :value="totals.sections[si].total" money /></span>
               <div class="mini-actions">
                 <button class="icon-btn" title="Move up" @click="move(quote.sections, si, -1)" :disabled="si === 0">↑</button>
                 <button class="icon-btn" title="Move down" @click="move(quote.sections, si, 1)" :disabled="si === quote.sections.length - 1">↓</button>
@@ -1332,9 +1357,9 @@ const QuoteEditor = {
               <div class="line-head">
                 <span></span><span>Item</span><span class="c">Qty</span><span class="r">Unit price</span><span class="r">Total</span><span></span>
               </div>
-              <template v-for="(item, ii) in section.items" :key="item.id">
-
-                <div class="line labour-only" v-if="item.kind === 'labour'">
+              <TransitionGroup tag="div" name="row" class="line-list">
+              <div v-for="(item, ii) in section.items" :key="item.id" class="line" :class="{ 'labour-only': item.kind === 'labour' }">
+                <template v-if="item.kind === 'labour'">
                   <div class="thumb labour-thumb"><span></span></div>
                   <div class="l-main">
                     <div class="l-name-row">
@@ -1353,9 +1378,9 @@ const QuoteEditor = {
                     <button class="icon-btn" title="Move down" @click="move(section.items, ii, 1)" :disabled="ii === section.items.length - 1">↓</button>
                     <button class="icon-btn danger" title="Remove" @click="removeItem(section, item)">✕</button>
                   </div>
-                </div>
+                </template>
 
-                <div class="line" v-else>
+                <template v-else>
                   <div class="thumb"><img v-if="item.image" :src="item.image" alt=""></div>
                   <div class="l-main">
                     <input class="l-name plain-input" v-model="item.name" aria-label="Item name">
@@ -1415,9 +1440,9 @@ const QuoteEditor = {
                     <button v-else-if="unusedLabour(item).length" class="link sm add-labour" @click="labourOpen[item.id] = true">+ Add labour</button>
                     <span class="labour-total" v-if="itemTotals(item).labourCost">Labour {{ money(itemTotals(item).labourCost) }}</span>
                   </div>
-                </div>
-
-              </template>
+                </template>
+              </div>
+              </TransitionGroup>
             </div>
             <div class="area-empty" v-else>No items in this area yet.</div>
 
@@ -1431,6 +1456,7 @@ const QuoteEditor = {
               </div>
             </footer>
           </section>
+          </TransitionGroup>
 
           <button class="btn add-area" @click="addSection">+ Add area or system</button>
         </template>
@@ -1585,7 +1611,7 @@ const QuoteEditor = {
         <template v-if="tab === 'history'">
           <section class="card">
             <h2 class="card-title">Client activity</h2>
-            <div v-if="!activity" class="empty">Loading…</div>
+            <div v-if="!activity" class="empty loading">Loading…</div>
             <template v-else>
               <div class="activity-stats">
                 <div><span>Times opened</span><b>{{ activity.views.count }}</b></div>
@@ -1611,7 +1637,7 @@ const QuoteEditor = {
               <input v-model="versionNote" maxlength="200" placeholder="Note (optional), e.g. Before adding the garden" @keydown.enter="saveVersion">
               <button class="btn" @click="saveVersion" :disabled="savingVersion">{{ savingVersion ? 'Saving…' : 'Save version' }}</button>
             </div>
-            <div v-if="!revisions" class="empty">Loading…</div>
+            <div v-if="!revisions" class="empty loading">Loading…</div>
             <div v-else-if="!versions.length" class="empty">No versions saved yet.</div>
             <ul class="versions" v-else>
               <li v-for="v in versions" :key="v.n" :class="[v.kind, { open: compareN === v.n }]">
@@ -1645,15 +1671,15 @@ const QuoteEditor = {
       <aside class="editor-side">
         <div class="card summary">
           <h3>Summary</h3>
-          <div class="sum-row"><span>Equipment</span><b>{{ money(totals.equipment) }}</b></div>
-          <div class="sum-row"><span>Labour <small>{{ hours(totals.labourHours) }}</small></span><b>{{ money(totals.labour) }}</b></div>
+          <div class="sum-row"><span>Equipment</span><b><AnimatedNumber :value="totals.equipment" money /></b></div>
+          <div class="sum-row"><span>Labour <small>{{ hours(totals.labourHours) }}</small></span><b><AnimatedNumber :value="totals.labour" money /></b></div>
           <div class="sum-sub" v-for="l in totals.labourByType.filter(x => x.hours > 0)" :key="l.id">
             <span>{{ l.name }} · {{ hours(l.hours) }}</span><span>{{ money(l.cost) }}</span>
           </div>
           <div class="sum-row disc" v-if="totals.discount"><span>{{ totals.discountLabel }}</span><b>−{{ money(totals.discount) }}</b></div>
-          <div class="sum-row sep"><span>Subtotal</span><b>{{ money(totals.subtotal) }}</b></div>
-          <div class="sum-row"><span>VAT {{ totals.vatRate }}%</span><b>{{ money(totals.vat) }}</b></div>
-          <div class="sum-total"><span>Total inc VAT</span><strong>{{ money(totals.total) }}</strong></div>
+          <div class="sum-row sep"><span>Subtotal</span><b><AnimatedNumber :value="totals.subtotal" money /></b></div>
+          <div class="sum-row"><span>VAT {{ totals.vatRate }}%</span><b><AnimatedNumber :value="totals.vat" money /></b></div>
+          <div class="sum-total"><span>Total inc VAT</span><strong><AnimatedNumber :value="totals.total" money from-zero /></strong></div>
           <div class="sum-savings" v-if="totals.savings">Client saves {{ money(totals.savings) }} + VAT</div>
           <div class="side-actions">
             <button class="btn" @click="openProposal(false)">Preview</button>
@@ -1663,7 +1689,7 @@ const QuoteEditor = {
         </div>
         <div class="card profit" v-if="!hideProfit">
           <div class="profit-head"><h3>Profit <small>only you see this</small></h3><button class="link sm" @click="toggleProfit">Hide</button></div>
-          <div class="profit-big" :class="marginClass"><strong>{{ money(totals.profit) }}</strong><span>{{ pct(totals.margin) }} margin</span></div>
+          <div class="profit-big" :class="marginClass"><strong><AnimatedNumber :value="totals.profit" money from-zero /></strong><span>{{ pct(totals.margin) }} margin</span></div>
           <div class="margin-bar" :class="marginClass"><span :style="{ width: Math.max(0, Math.min(100, totals.margin)) + '%' }"></span></div>
           <div class="sum-sub"><span>On equipment</span><span>{{ money(totals.equipmentProfit) }}</span></div>
           <div class="sum-sub"><span>On labour</span><span>{{ money(totals.labourProfit) }}</span></div>
@@ -1683,9 +1709,9 @@ const QuoteEditor = {
       </aside>
     </div>
 
-    <ProductPicker v-if="pickerSection" :section-name="pickerSectionName" :quote="quote" @add="addItem" @close="pickerSection = null" />
+    <Transition name="modal"><ProductPicker v-if="pickerSection" :section-name="pickerSectionName" :quote="quote" @add="addItem" @close="pickerSection = null" /></Transition>
 
-    <Modal v-if="kitDraft" title="Save as kit" @close="kitDraft = null">
+    <Transition name="modal"><Modal v-if="kitDraft" title="Save as kit" @close="kitDraft = null">
       <p class="muted sm" style="margin-top: 0">Saves the {{ kitDraft.items.length }} line{{ kitDraft.items.length === 1 ? '' : 's' }} in this area, with their labour, so you can add them to any quote from <b>Add product → Kits</b>. Ubiquiti prices update to the store's when you add it.</p>
       <form class="form-grid" id="kit-form" @submit.prevent="saveKit">
         <label class="span-2">Kit name<input v-model="kitDraft.name" required maxlength="120" placeholder="e.g. Standard WiFi room"></label>
@@ -1695,9 +1721,9 @@ const QuoteEditor = {
         <button class="btn" @click="kitDraft = null">Cancel</button>
         <button class="btn primary" type="submit" form="kit-form" :disabled="kitDraft.saving">{{ kitDraft.saving ? 'Saving…' : 'Save kit' }}</button>
       </template>
-    </Modal>
+    </Modal></Transition>
 
-    <Modal v-if="conflict" :title="conflictByClient ? 'The client has replied' : 'This quote was changed by someone else'" @close="useTheirs">
+    <Transition name="modal"><Modal v-if="conflict" :title="conflictByClient ? 'The client has replied' : 'This quote was changed by someone else'" @close="useTheirs">
       <p v-if="conflictByClient">While you were editing, {{ conflict.clientResponse.name }} replied on the client link: <b>{{ REPLY_LABELS[conflict.clientResponse.action] }}</b> ({{ formatDateTime(conflict.clientResponse.at) }}).</p>
       <p v-else>While you were editing, another person saved changes to {{ quote.number }} ({{ formatDateTime(conflict.updatedAt) }}).</p>
       <p class="muted">Load the latest version (your unsaved edits will be lost), or keep yours{{ conflictByClient ? ' (the client’s reply is kept either way)' : ' and replace theirs' }}.</p>
@@ -1705,7 +1731,7 @@ const QuoteEditor = {
         <button class="btn" @click="keepMine">Keep mine</button>
         <button class="btn primary" @click="useTheirs">Load their version</button>
       </template>
-    </Modal>
+    </Modal></Transition>
   </div>`,
 };
 
@@ -1819,11 +1845,12 @@ const ProductsPage = {
   template: `
   <div class="page">
     <div class="page-head">
-      <div><h1>Products</h1><p class="muted">The catalogue the quote builder draws from.</p></div>
+      <MeshBand />
+      <div><p class="eyebrow">Catalogue</p><h1>Products</h1><p class="muted">The catalogue the quote builder draws from.</p></div>
       <button v-if="tab === 'custom'" class="btn primary lg" @click="newProduct">+ Add product</button>
     </div>
 
-    <nav class="tabs">
+    <nav class="tabs" v-tab-ink>
       <button :class="{ active: tab === 'ubiquiti' }" @click="tab = 'ubiquiti'">Ubiquiti UK store</button>
       <button :class="{ active: tab === 'custom' }" @click="tab = 'custom'">Our products <span class="count">{{ cat.products.filter(p => p.source === 'custom').length }}</span></button>
       <button :class="{ active: tab === 'kits' }" @click="tab = 'kits'">Kits <span class="count" v-if="kitsLoaded">{{ kits.length }}</span></button>
@@ -1831,7 +1858,7 @@ const ProductsPage = {
 
     <template v-if="tab === 'kits'">
       <p class="hint">Kits are groups of items and labour you use often, such as a standard WiFi room. To make one, build an area on a quote and click <b>Save as kit</b> under it. To use one, click <b>+ Add product</b> on a quote and open <b>Kits</b>.</p>
-      <div class="card" v-if="!kitsLoaded"><div class="empty">Loading…</div></div>
+      <div class="card" v-if="!kitsLoaded"><div class="empty loading">Loading…</div></div>
       <div class="card empty-state" v-else-if="!kits.length">
         <div class="es-mark"></div>
         <h2>No kits yet</h2>
@@ -1874,7 +1901,7 @@ const ProductsPage = {
     </div>
 
     <div class="card table-card">
-      <div class="empty" v-if="cat.loading && !cat.loaded">Loading…</div>
+      <div class="empty loading" v-if="cat.loading && !cat.loaded">Loading…</div>
       <div class="empty" v-else-if="!matches.length">
         <template v-if="tab === 'custom' && !pool.length">No products yet. Add products from other manufacturers here so you can reuse them on quotes.</template>
         <template v-else>No products match.</template>
@@ -1908,7 +1935,7 @@ const ProductsPage = {
     </div>
     </template>
 
-    <Modal v-if="kitEditing" title="Rename kit" @close="kitEditing = null">
+    <Transition name="modal"><Modal v-if="kitEditing" title="Rename kit" @close="kitEditing = null">
       <form class="form-grid" id="kit-edit-form" @submit.prevent="saveKitEdit">
         <label class="span-2">Kit name<input v-model="kitEditing.name" required maxlength="120"></label>
         <label class="span-2">Description (optional)<textarea v-model="kitEditing.description" rows="3" maxlength="1000"></textarea></label>
@@ -1917,9 +1944,9 @@ const ProductsPage = {
         <button class="btn" @click="kitEditing = null">Cancel</button>
         <button class="btn primary" type="submit" form="kit-edit-form">Save</button>
       </template>
-    </Modal>
+    </Modal></Transition>
 
-    <Modal v-if="editing" :title="editing.id ? 'Edit product' : 'Add product'" @close="editing = null">
+    <Transition name="modal"><Modal v-if="editing" :title="editing.id ? 'Edit product' : 'Add product'" @close="editing = null">
       <form class="form-grid" @submit.prevent="save" id="product-form">
         <label>Manufacturer<input v-model="editing.manufacturer" placeholder="e.g. Sonos"></label>
         <label>Model / SKU<input v-model="editing.model"></label>
@@ -1935,7 +1962,7 @@ const ProductsPage = {
         <button class="btn" @click="editing = null">Cancel</button>
         <button class="btn primary" type="submit" form="product-form">Save product</button>
       </template>
-    </Modal>
+    </Modal></Transition>
   </div>`,
 };
 
@@ -2024,7 +2051,8 @@ const SettingsPage = {
   template: `
   <div class="page settings">
     <div class="page-head">
-      <div><h1>Settings</h1><p class="muted">Defaults for new quotes. Existing quotes keep their own copies of rates and text.</p></div>
+      <MeshBand />
+      <div><p class="eyebrow">Your business</p><h1>Settings</h1><p class="muted">Defaults for new quotes. Existing quotes keep their own copies of rates and text.</p></div>
       <button class="btn primary lg" @click="save" :disabled="saving">{{ saving ? 'Saving…' : dirty ? 'Save changes' : 'Saved' }}</button>
     </div>
 
@@ -2117,7 +2145,7 @@ const SettingsPage = {
       <p class="muted sm">These are example terms — please check them before sending proposals.</p>
     </section>
 
-    <Modal v-if="restart" title="Start quote numbers again" @close="restart = null">
+    <Transition name="modal"><Modal v-if="restart" title="Start quote numbers again" @close="restart = null">
       <p style="margin-top: 0">The next new quote will be <b>{{ quoteNumber(1) }}</b>.</p>
       <p class="muted" v-if="restart.count === null">Checking your quotes…</p>
       <template v-else-if="restart.count">
@@ -2134,7 +2162,7 @@ const SettingsPage = {
           {{ restart.busy ? 'Working…' : restart.deleteQuotes ? 'Delete quotes and start again' : 'Start again from ' + quoteNumber(1) }}
         </button>
       </template>
-    </Modal>
+    </Modal></Transition>
   </div>`,
 };
 
@@ -2154,6 +2182,111 @@ const LightSwitch = {
       @click="$emit('update:modelValue', on ? 'dark' : 'light')">
       <span class="ls-plate" aria-hidden="true"><span class="ls-rocker"></span></span>
     </button>`,
+};
+
+// ---- Numbers that roll to their new value ----------------------------------------------
+// <AnimatedNumber :value="pence" money /> rolls smoothly whenever the value changes.
+// With from-zero it also counts up when it first appears.
+
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const AnimatedNumber = {
+  props: { value: { type: Number, default: 0 }, money: Boolean, fromZero: Boolean },
+  data() {
+    return { shown: this.fromZero && !prefersReducedMotion() ? 0 : this.value || 0 };
+  },
+  computed: {
+    text() {
+      const n = Math.round(this.shown);
+      return this.money ? money(n) : String(n);
+    },
+  },
+  watch: {
+    value(to) {
+      this.roll(to || 0, 550);
+    },
+  },
+  mounted() {
+    if (this.shown !== (this.value || 0)) this.roll(this.value || 0, 900);
+  },
+  beforeUnmount() {
+    cancelAnimationFrame(this.raf);
+  },
+  methods: {
+    roll(to, duration) {
+      cancelAnimationFrame(this.raf);
+      if (prefersReducedMotion()) return (this.shown = to);
+      const from = this.shown;
+      const start = performance.now();
+      const step = (now) => {
+        const p = Math.min(1, (now - start) / duration);
+        const eased = 1 - Math.pow(1 - p, 3); // fast start, gentle finish
+        this.shown = from + (to - from) * eased;
+        if (p < 1) this.raf = requestAnimationFrame(step);
+      };
+      this.raf = requestAnimationFrame(step);
+    },
+  },
+  template: `<span class="anim-num">{{ text }}</span>`,
+};
+
+// ---- Moving mesh behind the page tops ------------------------------------------------
+
+const MeshBand = {
+  mounted() {
+    this.mesh = window.MeshNodes ? window.MeshNodes.attach(this.$el) : null;
+  },
+  beforeUnmount() {
+    if (this.mesh) this.mesh.destroy();
+  },
+  template: `<canvas class="band-canvas" aria-hidden="true"></canvas>`,
+};
+
+// ---- Sliding underline for tab bars ----------------------------------------------------
+// Add v-tab-ink to a .tabs bar: the blue line glides to the active tab.
+
+const tabInk = {
+  mounted(el) {
+    const ink = {
+      active: null,
+      place(instant) {
+        const btn = el.querySelector(':scope > button.active');
+        if (!btn) return el.style.setProperty('--ink-o', '0');
+        const x = btn.offsetLeft;
+        const w = btn.offsetWidth;
+        if (x === ink.x && w === ink.w) return; // nothing moved
+        ink.x = x;
+        ink.w = w;
+        el.classList.toggle('ink-instant', !!instant);
+        el.style.setProperty('--ink-x', `${x}px`);
+        el.style.setProperty('--ink-w', `${w}px`);
+        el.style.setProperty('--ink-o', '1');
+        if (instant) requestAnimationFrame(() => el.classList.remove('ink-instant'));
+      },
+      watch() {
+        const btn = el.querySelector(':scope > button.active');
+        if (btn === ink.active) return false;
+        if (ink.active) ink.sizes.unobserve(ink.active);
+        ink.active = btn;
+        if (btn) ink.sizes.observe(btn);
+        return true;
+      },
+    };
+    // Re-measure when the bar or the active tab changes size (fonts loading, counts).
+    ink.sizes = new ResizeObserver(() => ink.place(true));
+    ink.sizes.observe(el);
+    el._ink = ink;
+    el.classList.add('has-ink');
+    ink.watch();
+    ink.place(true);
+  },
+  updated(el) {
+    const ink = el._ink;
+    if (ink && ink.watch()) ink.place(false);
+  },
+  unmounted(el) {
+    if (el._ink) el._ink.sizes.disconnect();
+  },
 };
 
 // ---- App shell ---------------------------------------------------------------------
@@ -2234,9 +2367,13 @@ const App = {
     <ProductsPage v-else-if="route.name === 'products'" />
     <SettingsPage v-else-if="route.name === 'settings'" />
   </main>
-  <div class="toasts" aria-live="polite">
-    <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type">{{ t.msg }}</div>
-  </div>`,
+  <TransitionGroup tag="div" class="toasts" name="toast" aria-live="polite">
+    <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type" :style="{ '--life': t.life + 'ms' }">{{ t.msg }}</div>
+  </TransitionGroup>`,
 };
 
-createApp(App).mount('#app');
+const app = createApp(App);
+app.component('MeshBand', MeshBand);
+app.component('AnimatedNumber', AnimatedNumber);
+app.directive('tab-ink', tabInk);
+app.mount('#app');
