@@ -125,12 +125,15 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | --- | --- |
 | `v1` | Before discounts, profit, client replies, view tracking, versions and kits |
 | `v2` | Adds those features |
+| `v3` | Lighter, simpler proposal and PDF design (white cover, no dark panels) |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s
   live in seconds and the code isn’t changed. Undo it the same way.
-- **Permanent, in GitHub:** `git revert --no-edit v1..v2`, then `git push`. Vercel
-  then deploys the old version. To bring the features back, revert that revert.
+- **Permanent, in GitHub:** undo everything after the version you want, e.g.
+  `git revert --no-edit v2..HEAD` to go back to `v2` (or `v1..HEAD` for `v1`),
+  then `git push`. Vercel then deploys that version. To move forward again,
+  revert those reverts.
 
 Rolling back deletes nothing. The older version ignores the newer information
 (client replies, views, saved versions, kits, labour costs) and it reappears when

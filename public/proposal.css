@@ -6,6 +6,7 @@
 @font-face { font-family: 'Poppins'; font-weight: 600; font-display: swap; src: url('/fonts/poppins-600.woff2') format('woff2'); }
 
 :root {
+  --blue-mist: #eef4fa;
   --ink: #2b2b2b;
   --charcoal: #525252;
   --text: #4a4a4a;
@@ -61,19 +62,21 @@ body.web-mode { background: #e9e9e9; }
   position: sticky; top: 0; z-index: 10;
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
   padding: 10px 20px;
-  background: var(--charcoal); color: #fff;
+  background: #fff; color: var(--ink);
+  border-bottom: 1px solid var(--line);
   font-size: 13px;
 }
 .toolbar a, .toolbar button {
-  font: inherit; font-weight: 400; color: #fff; text-decoration: none;
-  background: transparent; border: 1px solid rgba(255,255,255,0.35); border-radius: 6px;
+  font: inherit; font-weight: 400; color: var(--ink); text-decoration: none;
+  background: #fff; border: 1px solid #d3d3d3; border-radius: 6px;
   padding: 7px 14px; cursor: pointer;
 }
-.toolbar .tb-back { border-color: transparent; padding-left: 0; }
-.toolbar .tb-brand { color: var(--grey); letter-spacing: 0.04em; }
+.toolbar .tb-back { border-color: transparent; padding-left: 0; color: var(--muted); }
+.toolbar .tb-brand { color: var(--muted); letter-spacing: 0.04em; }
 .toolbar .tb-actions { display: flex; gap: 8px; }
-.toolbar .tb-primary { background: var(--blue); border-color: var(--blue); }
-.toolbar a:hover, .toolbar button:hover { border-color: #fff; }
+.toolbar .tb-primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.toolbar a:hover, .toolbar button:hover { border-color: var(--charcoal); }
+.toolbar .tb-back:hover { border-color: transparent; color: var(--ink); }
 .toolbar .tb-primary:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
 .toolbar .tb-brand { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -104,36 +107,33 @@ body.web-mode { background: #e9e9e9; }
   position: relative;
   display: flex; flex-direction: column;
   min-height: 297mm;
-  padding: 22mm 18mm 20mm;
-  background: var(--charcoal);
-  color: #fff;
+  padding: 20mm 18mm 18mm;
+  background: #fff;
+  color: var(--text);
   overflow: hidden;
   break-after: page;
 }
-.web-mode .cover { min-height: 0; aspect-ratio: 210 / 297; }
-.cover::after { /* the blue full stop from the logo, as a graphic element */
-  content: ''; position: absolute; right: 18mm; bottom: 58mm;
-  width: 14mm; height: 14mm; background: var(--blue);
-}
-.cover::before {
-  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 46mm;
-  background: #474747;
-}
-.cover-top { display: flex; justify-content: space-between; align-items: flex-start; position: relative; z-index: 1; }
-.cover-logo { width: 46mm; height: auto; display: block; }
-.cover-tag { font-size: 8.5pt; letter-spacing: 0.12em; text-transform: uppercase; color: var(--grey); padding-top: 3mm; }
-.cover-main { margin-top: auto; margin-bottom: 30mm; position: relative; z-index: 1; max-width: 140mm; }
-.cover .eyebrow { font-size: 9pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--grey); margin-bottom: 5mm; }
-.cover h1 { color: #fff; font-size: 30pt; font-weight: 500; line-height: 1.12; letter-spacing: -0.01em; }
-.cover-client { margin-top: 6mm; font-size: 13pt; color: #e6e6e6; }
+/* On screen the cover is shorter than a page, so the title isn't below the fold. */
+.web-mode .cover { min-height: 0; }
+.web-mode .cover-main { margin-top: 42mm; }
+.cover-top { display: flex; justify-content: space-between; align-items: flex-end; }
+.cover-logo { width: 38mm; height: auto; display: block; }
+.cover-tag { font-size: 8pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); padding-bottom: 1mm; }
+.cover-main { margin-top: auto; margin-bottom: 18mm; max-width: 150mm; }
+.cover .eyebrow { font-size: 8.5pt; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-bottom: 6mm; }
+.cover h1 { color: var(--ink); font-size: 34pt; font-weight: 500; line-height: 1.1; letter-spacing: -0.015em; text-wrap: balance; }
+/* Ends the title with the blue full stop from the Mesh logo. */
+.cover h1::after { content: ''; display: inline-block; width: 0.17em; height: 0.17em; margin-left: 0.07em; background: var(--blue); }
+.cover-client { margin-top: 6mm; font-size: 13pt; font-weight: 300; color: var(--text); }
 .cover-meta {
-  position: relative; z-index: 1;
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 6mm;
-  min-height: 26mm; align-items: end;
-  font-size: 10pt; color: #fff;
+  padding-top: 6mm; border-top: 1px solid var(--line);
+  font-size: 10pt; color: var(--ink);
 }
-.cover-meta span { display: block; font-size: 7.5pt; letter-spacing: 0.12em; text-transform: uppercase; color: var(--grey); margin-bottom: 1mm; }
-.cover-meta small { color: var(--grey); font-size: 8pt; }
+.cover-meta > div { min-width: 0; }
+.cover-meta span { display: block; font-size: 7pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 1.5mm; }
+.cover-meta .investment-figure { font-weight: 500; color: var(--blue-dark); }
+.cover-meta small { color: var(--muted); font-size: 8pt; font-weight: 300; }
 
 /* ---- Body ----------------------------------------------------------------------- */
 
@@ -144,11 +144,9 @@ body.web-mode { background: #e9e9e9; }
 .block { margin-bottom: 9mm; }
 .block > h2 {
   font-size: 15pt; margin-bottom: 4mm; padding-bottom: 2.5mm;
-  border-bottom: 2px solid var(--ink);
-  display: flex; align-items: baseline; gap: 3mm;
+  border-bottom: 1px solid var(--line);
+  break-after: avoid;
 }
-.block > h2 { break-after: avoid; }
-.block > h2::after { content: ''; width: 2.2mm; height: 2.2mm; background: var(--blue); display: inline-block; }
 .keep { break-inside: avoid; }
 
 .rich ul { margin: 0 0 0.7em; padding-left: 5mm; }
@@ -156,8 +154,7 @@ body.web-mode { background: #e9e9e9; }
 .rich li::marker { color: var(--blue); }
 
 .area { margin-top: 7mm; }
-.area h3 { font-size: 12pt; display: flex; align-items: center; gap: 2.5mm; margin-bottom: 2mm; break-after: avoid; }
-.area h3 .dot { width: 2.4mm; height: 2.4mm; background: var(--blue); flex: none; }
+.area h3 { font-size: 12pt; margin-bottom: 2mm; break-after: avoid; }
 .area-desc { margin-bottom: 3mm; color: var(--text); break-after: avoid; }
 .area-intro { break-inside: avoid; break-after: avoid; }
 table.items thead { break-after: avoid; }
@@ -204,7 +201,6 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
 .summary-table td { padding: 2.5mm 2mm; border-bottom: 1px solid var(--line); }
 .summary-table tfoot td { font-weight: 500; color: var(--ink); border-bottom: none; }
 .summary-table .num { text-align: right; white-space: nowrap; }
-.summary-table.by-area { margin-bottom: 5mm; }
 
 .investment { display: grid; grid-template-columns: 1.3fr 1fr; gap: 0; border: 1px solid var(--line); }
 .inv-rows { padding: 5mm 6mm; }
@@ -213,13 +209,13 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
 .inv-rows b { font-weight: 500; }
 .inv-rows .disc, .inv-rows .disc b { color: var(--blue-dark); }
 .inv-total {
-  background: var(--charcoal); color: #fff; padding: 6mm;
+  background: var(--blue-mist); color: var(--ink); padding: 6mm;
+  border-left: 3px solid var(--blue);
   display: flex; flex-direction: column; justify-content: center; position: relative;
 }
-.inv-total::after { content: ''; position: absolute; right: 6mm; top: 6mm; width: 3mm; height: 3mm; background: var(--blue); }
-.inv-total span { font-size: 7.5pt; letter-spacing: 0.12em; text-transform: uppercase; color: var(--grey); }
-.inv-total strong { color: #fff; font-size: 22pt; font-weight: 500; line-height: 1.2; margin-top: 1mm; }
-.inv-total em { font-style: normal; font-size: 8.5pt; color: #cfe2f5; margin-top: 1.5mm; }
+.inv-total span { font-size: 7.5pt; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.inv-total strong { color: var(--ink); font-size: 22pt; font-weight: 500; line-height: 1.2; margin-top: 1mm; }
+.inv-total em { font-style: normal; font-size: 8.5pt; font-weight: 500; color: var(--blue-dark); margin-top: 1.5mm; }
 
 .terms .rich { font-size: 8.5pt; }
 
@@ -278,7 +274,7 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   margin-top: 14mm; padding-top: 6mm; border-top: 1px solid var(--line);
   font-size: 8pt; color: var(--muted); break-inside: avoid;
 }
-.doc-footer img { width: 24mm; height: auto; border-radius: 1.5mm; }
+.doc-footer img { width: 18mm; height: auto; flex: none; }
 
 /* ---- Print -------------------------------------------------------------------- */
 
@@ -289,6 +285,7 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   .web-mode .doc { width: auto; max-width: none; margin: 0; box-shadow: none; }
   .web-mode .page-flow { padding: 0; }
   .web-mode .cover, .cover { aspect-ratio: auto; height: 297mm; min-height: 0; }
+  .web-mode .cover-main { margin-top: auto; }
 }
 
 /* ---- Small screens ---------------------------------------------------------- */
@@ -296,11 +293,10 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
 @media screen and (max-width: 720px) {
   .web-mode .doc { max-width: 100%; margin: 0; }
   .web-mode .page-flow { padding: 24px 16px; }
-  .web-mode .cover { aspect-ratio: auto; min-height: 560px; padding: 28px 20px; }
-  .cover h1 { font-size: 24pt; }
-  .cover-meta { grid-template-columns: 1fr 1fr; }
-  .cover::before { height: 150px; }
-  .cover::after { bottom: 170px; right: 20px; }
+  .web-mode .cover { aspect-ratio: auto; min-height: 0; padding: 24px 20px 20px; }
+  .web-mode .cover-main { margin: 64px 0 40px; }
+  .cover h1 { font-size: 25pt; }
+  .cover-meta { grid-template-columns: 1fr 1fr; padding: 16px 0 0; gap: 16px; }
   .parties, .investment { grid-template-columns: 1fr; }
   .toolbar { padding: 10px 16px; }
   .toolbar a, .toolbar button { padding: 7px 11px; }
@@ -310,10 +306,8 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   .respond-form { padding: 16px; }
   .respond-actions .r-btn { flex: 1 1 auto; }
   .included { columns: 1; }
-  .summary-table.by-area th:nth-child(2), .summary-table.by-area td:nth-child(2),
-  .summary-table.by-area th:nth-child(3), .summary-table.by-area td:nth-child(3) { display: none; }
-  .cover-top { flex-direction: column; gap: 8px; }
-  .cover-logo { width: 130px; }
+  .cover-top { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .cover-logo { width: 110px; }
   .cover-tag { padding-top: 0; }
 
   /* Stack each line: name on top, then "6 × £154.00   £924.00". */
