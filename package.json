@@ -1,0 +1,15 @@
+{
+  "name": "mesh-quoting-tool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Proof-of-concept quoting and proposal tool for Mesh Smart Home Technology",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:shared": "node server.js --shared",
+    "sync": "node scripts/sync-catalogue.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,1561 @@
+/* Mesh quoting tool — browser app (Vue 3, no build step). */
+
+const { createApp, reactive, nextTick } = Vue;
+const C = window.QuoteCalc;
+
+// ---- Small helpers -----------------------------------------------------------
+
+const uid = () => Math.random().toString(36).slice(2, 10);
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const money = (p) => C.money(p);
+const hours = (h) => C.hours(h);
+const penceToPounds = (p) => (p == null || p === '' ? '' : (Number(p) / 100).toFixed(2));
+const poundsToPence = (s) => Math.round(parseFloat(String(s).replace(/[£,\s]/g, '')) * 100);
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    /* empty response */
+  }
+  if (res.status === 401 && !url.startsWith('/api/login')) {
+    goToSignIn();
+  }
+  if (res.status === 503 && data?.setup) {
+    state.setupMessage = data.error;
+  }
+  if (!res.ok) {
+    const err = new Error(data?.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+function goToSignIn() {
+  location.href = `/login.html${location.hash && location.hash.length > 2 ? location.hash : ''}`;
+}
+
+function timeAgo(iso) {
+  if (!iso) return '';
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} hr ago`;
+  if (s < 86400 * 7) return `${Math.floor(s / 86400)} day${s >= 172800 ? 's' : ''} ago`;
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatDateTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function storageGet(key, fallback = null) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function storageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode etc. */
+  }
+}
+
+// Variant labels like "UK Version · Single Unit" add nothing on a quote.
+function cleanVariantLabel(label) {
+  return String(label || '')
+    .split(' · ')
+    .filter((p) => !/^(UK Version|Single Unit|Single)$/i.test(p.trim()))
+    .join(' · ');
+}
+
+function itemFromProduct(product, variant, qty) {
+  const label = cleanVariantLabel(variant.label);
+  return {
+    id: uid(),
+    kind: 'product',
+    source: product.source,
+    productId: product.id,
+    manufacturer: product.manufacturer,
+    name: product.name + (label ? ` (${label})` : ''),
+    model: product.model,
+    sku: variant.sku || product.model,
+    variantLabel: label,
+    description: product.description || '',
+    image: product.image || null,
+    url: product.url || null,
+    basePrice: variant.price,
+    surcharge: variant.surcharge || 0,
+    costPrice: product.cost ?? null,
+    priceOverride: null,
+    qty: Math.max(1, Number(qty) || 1),
+    labour: [],
+  };
+}
+
+const STATUS_LABELS = { draft: 'Draft', sent: 'Sent', accepted: 'Accepted', declined: 'Declined' };
+const CORE_LABOUR = ['installation', 'commissioning', 'programming', 'project_management'];
+
+// ---- Shared state ------------------------------------------------------------
+
+const state = reactive({
+  route: parseRoute(),
+  session: null,
+  setupMessage: null,
+  settings: null,
+  me: storageGet('mesh.me', ''),
+  catalogue: { loaded: false, loading: false, syncing: false, products: [], sources: [] },
+  toasts: [],
+});
+
+function parseRoute() {
+  const parts = (location.hash.replace(/^#\/?/, '') || '').split('/').filter(Boolean);
+  if (parts[0] === 'quote' && parts[1]) return { name: 'quote', id: parts[1] };
+  if (parts[0] === 'products') return { name: 'products' };
+  if (parts[0] === 'settings') return { name: 'settings' };
+  return { name: 'quotes' };
+}
+window.addEventListener('hashchange', () => {
+  state.route = parseRoute();
+  window.scrollTo(0, 0);
+});
+
+function toast(msg, type = 'ok') {
+  const t = { id: uid(), msg, type };
+  state.toasts.push(t);
+  setTimeout(() => {
+    const i = state.toasts.indexOf(t);
+    if (i >= 0) state.toasts.splice(i, 1);
+  }, type === 'error' ? 6000 : 2800);
+}
+
+async function loadCatalogue(force = false) {
+  if (state.catalogue.loading || (state.catalogue.loaded && !force)) return;
+  state.catalogue.loading = true;
+  try {
+    const data = await api('GET', '/api/catalogue');
+    state.catalogue.products = Object.freeze(data.products);
+    state.catalogue.sources = data.sources;
+    state.catalogue.loaded = true;
+  } catch (err) {
+    toast(`Could not load products: ${err.message}`, 'error');
+  } finally {
+    state.catalogue.loading = false;
+  }
+}
+
+// Takes about 10 seconds: the server reads the whole Ubiquiti UK store.
+async function syncUbiquiti() {
+  if (state.catalogue.syncing) return;
+  state.catalogue.syncing = true;
+  try {
+    const data = await api('POST', '/api/catalogue/ubiquiti/sync');
+    state.catalogue.sources = data.sources;
+    const ubnt = data.sources.find((s) => s.id === 'ubiquiti') || {};
+    if (ubnt.error) toast(`Ubiquiti refresh had a problem: ${ubnt.error}`, 'error');
+    else toast(`Ubiquiti prices updated (${ubnt.count} products)`);
+    await loadCatalogue(true);
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    state.catalogue.syncing = false;
+  }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    window.prompt('Copy this link:', text);
+    return false;
+  }
+}
+
+const sharedMethods = { money, hours, timeAgo, formatDateTime, penceToPounds };
+
+// ---- Reusable inputs -----------------------------------------------------------
+
+const MoneyInput = {
+  props: { modelValue: { default: null }, placeholder: { default: null }, small: Boolean },
+  emits: ['update:modelValue'],
+  data() {
+    return { text: penceToPounds(this.modelValue), focused: false };
+  },
+  watch: {
+    modelValue(v) {
+      if (!this.focused) this.text = penceToPounds(v);
+    },
+  },
+  methods: {
+    penceToPounds,
+    onInput(e) {
+      this.text = e.target.value;
+      const t = this.text.trim();
+      if (t === '') return this.$emit('update:modelValue', null);
+      const p = poundsToPence(t);
+      if (Number.isFinite(p)) this.$emit('update:modelValue', Math.max(0, p));
+    },
+    onBlur() {
+      this.focused = false;
+      this.text = penceToPounds(this.modelValue);
+    },
+  },
+  template: `<label class="money-input" :class="{ small }"><span>£</span><input type="text" inputmode="decimal" :value="text" :placeholder="placeholder != null ? penceToPounds(placeholder) : '0.00'" @focus="focused = true" @input="onInput" @blur="onBlur"></label>`,
+};
+
+const AutoTextarea = {
+  props: { modelValue: { type: String, default: '' }, placeholder: String, rows: { type: Number, default: 3 }, plain: Boolean },
+  emits: ['update:modelValue'],
+  mounted() {
+    this.resize();
+  },
+  watch: {
+    modelValue() {
+      nextTick(() => this.resize());
+    },
+  },
+  methods: {
+    resize() {
+      const el = this.$el;
+      if (!el) return;
+      el.style.height = 'auto';
+      el.style.height = `${el.scrollHeight + 2}px`;
+    },
+  },
+  template: `<textarea :class="{ plain }" :value="modelValue" :placeholder="placeholder" :rows="rows" @input="$emit('update:modelValue', $event.target.value); resize()"></textarea>`,
+};
+
+const Modal = {
+  props: { title: String, wide: Boolean },
+  emits: ['close'],
+  mounted() {
+    this.onKey = (e) => e.key === 'Escape' && this.$emit('close');
+    window.addEventListener('keydown', this.onKey);
+  },
+  unmounted() {
+    window.removeEventListener('keydown', this.onKey);
+  },
+  template: `
+    <div class="modal-backdrop" @mousedown.self="$emit('close')">
+      <div class="modal" :class="{ wide }" role="dialog" aria-modal="true" :aria-label="title">
+        <header class="modal-head">
+          <h2>{{ title }}</h2>
+          <button class="icon-btn" @click="$emit('close')" aria-label="Close">✕</button>
+        </header>
+        <div class="modal-body"><slot></slot></div>
+        <footer class="modal-foot" v-if="$slots.footer"><slot name="footer"></slot></footer>
+      </div>
+    </div>`,
+};
+
+// ---- Product search (used by the picker and the products page) -----------
+
+const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+function searchProducts(products, query, category) {
+  const words = query.toLowerCase().split(/[\s-]+/).filter(Boolean);
+  const nq = norm(query);
+  const out = [];
+  for (const p of products) {
+    if (category && p.category !== category) continue;
+    if (words.length) {
+      if (!p._hay) {
+        // Searchable text: "primary" (name, model, SKUs) and everything.
+        const primary = [p.name, p.shortName, p.model, p.manufacturer, ...(p.variants || []).map((v) => v.sku)].join(' ').toLowerCase();
+        Object.defineProperty(p, '_primary', { value: primary });
+        Object.defineProperty(p, '_hay', { value: [primary, p.category, p.subCategory, p.description].join(' ').toLowerCase() });
+      }
+      if (!words.every((w) => p._hay.includes(w))) continue;
+    }
+    let score = 0;
+    if (nq) {
+      const model = norm(p.model);
+      if (model === nq) score += 100;
+      else if (model.startsWith(nq)) score += 40;
+      else if (model.includes(nq)) score += 20;
+      if ((p.variants || []).some((v) => norm(v.sku) === nq)) score += 80;
+      if (norm(p.shortName) === nq || norm(p.name) === nq) score += 60;
+      else if (norm(p.name).includes(nq)) score += 15;
+      score += 5 * words.filter((w) => p._primary.includes(w)).length;
+    }
+    out.push({ p, score });
+  }
+  if (nq) out.sort((a, b) => b.score - a.score || a.p.name.localeCompare(b.p.name));
+  return out.map((x) => x.p);
+}
+
+const STATUS_BADGE = { SoldOut: 'Sold out', ComingSoon: 'Coming soon', RegionNotAvailable: 'Unavailable' };
+
+// ---- Product picker -------------------------------------------------------------
+
+const ProductPicker = {
+  components: { Modal, MoneyInput },
+  props: { sectionName: String },
+  emits: ['add', 'close'],
+  data() {
+    return {
+      tab: 'ubiquiti',
+      q: '',
+      category: '',
+      variants: {},
+      qtys: {},
+      added: 0,
+      limit: 40,
+      manual: this.blankManual(),
+    };
+  },
+  computed: {
+    STATUS_BADGE: () => STATUS_BADGE,
+    cat() {
+      return state.catalogue;
+    },
+    pool() {
+      return this.cat.products.filter((p) => (this.tab === 'custom' ? p.source === 'custom' : p.source === 'ubiquiti'));
+    },
+    categories() {
+      return [...new Set(this.pool.map((p) => p.category))].sort();
+    },
+    matches() {
+      return searchProducts(this.pool, this.q, this.category);
+    },
+    results() {
+      return this.matches.slice(0, this.limit);
+    },
+    ubiquitiSource() {
+      return this.cat.sources.find((s) => s.id === 'ubiquiti') || {};
+    },
+  },
+  watch: {
+    q() {
+      this.limit = 40;
+    },
+    category() {
+      this.limit = 40;
+    },
+    tab() {
+      this.category = '';
+      this.limit = 40;
+      if (this.tab !== 'manual') nextTick(() => this.$refs.search?.focus());
+    },
+  },
+  mounted() {
+    loadCatalogue();
+    nextTick(() => this.$refs.search?.focus());
+  },
+  methods: {
+    ...sharedMethods,
+    blankManual() {
+      return { manufacturer: '', name: '', model: '', description: '', price: null, cost: null, image: '', qty: 1, save: true };
+    },
+    variantOf(p) {
+      const sku = this.variants[p.id] || p.defaultSku;
+      return p.variants.find((v) => v.sku === sku) || p.variants[0];
+    },
+    qtyOf(p) {
+      return this.qtys[p.id] ?? 1;
+    },
+    add(p) {
+      const v = this.variantOf(p);
+      const item = itemFromProduct(p, v, this.qtyOf(p));
+      this.$emit('add', item);
+      this.added += item.qty;
+      toast(`Added ${item.qty} × ${item.name}`);
+      this.qtys[p.id] = 1;
+    },
+    async addManual() {
+      const m = this.manual;
+      if (!m.name.trim()) return toast('Give the item a name first', 'error');
+      if (m.save) {
+        try {
+          await api('POST', '/api/products/custom', m);
+          loadCatalogue(true);
+        } catch (err) {
+          toast(`Could not save to Our products: ${err.message}`, 'error');
+        }
+      }
+      const item = {
+        id: uid(),
+        kind: 'product',
+        source: 'manual',
+        productId: null,
+        manufacturer: m.manufacturer.trim() || 'Other',
+        name: m.name.trim(),
+        model: m.model.trim(),
+        sku: m.model.trim(),
+        variantLabel: '',
+        description: m.description.trim(),
+        image: m.image.trim() || null,
+        url: null,
+        basePrice: m.price || 0,
+        surcharge: 0,
+        costPrice: m.cost,
+        priceOverride: null,
+        qty: Math.max(1, Number(m.qty) || 1),
+        labour: [],
+      };
+      this.$emit('add', item);
+      this.added += item.qty;
+      toast(`Added ${item.qty} × ${item.name}`);
+      this.manual = this.blankManual();
+    },
+  },
+  template: `
+  <Modal :title="'Add to ' + (sectionName || 'area')" wide @close="$emit('close')">
+    <div class="picker">
+      <div class="tabs">
+        <button :class="{ active: tab === 'ubiquiti' }" @click="tab = 'ubiquiti'">Ubiquiti</button>
+        <button :class="{ active: tab === 'custom' }" @click="tab = 'custom'">Our products</button>
+        <button :class="{ active: tab === 'manual' }" @click="tab = 'manual'">One-off item</button>
+      </div>
+
+      <template v-if="tab !== 'manual'">
+        <div class="picker-filters">
+          <input ref="search" class="search" type="search" v-model="q" :placeholder="tab === 'ubiquiti' ? 'Search Ubiquiti products, e.g. U7 Pro, USW-24-PoE, doorbell' : 'Search our products'">
+          <select v-model="category">
+            <option value="">All categories</option>
+            <option v-for="c in categories" :value="c">{{ c }}</option>
+          </select>
+        </div>
+
+        <p class="picker-meta" v-if="tab === 'ubiquiti'">
+          <template v-if="cat.syncing || ubiquitiSource.syncing">Updating from the Ubiquiti UK store…</template>
+          <template v-else-if="ubiquitiSource.fetchedAt">Prices from the Ubiquiti UK store, ex VAT · updated {{ timeAgo(ubiquitiSource.fetchedAt) }}</template>
+          <template v-else-if="cat.loaded">No Ubiquiti prices yet — refresh on the Products page.</template>
+        </p>
+
+        <div v-if="cat.loading && !cat.loaded" class="empty">Loading products…</div>
+        <div v-else-if="!results.length" class="empty">
+          <template v-if="tab === 'custom' && !pool.length">No saved products yet. Use <b>One-off item</b> and tick “Save to Our products”, or add them on the Products page.</template>
+          <template v-else>No products match “{{ q }}”.</template>
+        </div>
+
+        <ul class="results" v-else>
+          <li v-for="p in results" :key="p.id" class="result">
+            <div class="thumb"><img v-if="p.image" :src="p.image" alt="" loading="lazy"></div>
+            <div class="r-main">
+              <div class="r-name">{{ p.name }}</div>
+              <div class="r-sub">{{ p.manufacturer }} · {{ variantOf(p).sku || p.model }}<span v-if="p.subCategory"> · {{ p.category }} / {{ p.subCategory }}</span></div>
+              <div class="r-desc">{{ p.description }}</div>
+              <select v-if="p.variants.length > 1" class="variant" :value="variantOf(p).sku" @change="variants[p.id] = $event.target.value" aria-label="Option">
+                <option v-for="v in p.variants" :value="v.sku">{{ v.label || v.sku }} — {{ money(v.price) }}{{ v.status !== 'Available' ? ' (' + (STATUS_BADGE[v.status] || v.status) + ')' : '' }}</option>
+              </select>
+            </div>
+            <div class="r-price">
+              <div class="price">{{ money(variantOf(p).price) }}</div>
+              <div class="surcharge" v-if="variantOf(p).surcharge">+ {{ money(variantOf(p).surcharge) }} surcharge</div>
+              <span class="badge warn" v-if="STATUS_BADGE[variantOf(p).status]">{{ STATUS_BADGE[variantOf(p).status] }}</span>
+            </div>
+            <div class="r-add">
+              <input type="number" min="1" step="1" :value="qtyOf(p)" @input="qtys[p.id] = Math.max(1, parseInt($event.target.value) || 1)" aria-label="Quantity">
+              <button class="btn primary" @click="add(p)">Add</button>
+            </div>
+          </li>
+          <li v-if="matches.length > results.length" class="more">
+            <button class="btn ghost" @click="limit += 40">Show more ({{ matches.length - results.length }} more)</button>
+          </li>
+        </ul>
+      </template>
+
+      <form v-else class="manual form-grid" @submit.prevent="addManual">
+        <p class="hint span-2">For anything not in the Ubiquiti catalogue — other manufacturers, cable, sundries.</p>
+        <label>Manufacturer<input v-model="manual.manufacturer" placeholder="e.g. Sonos"></label>
+        <label>Model / SKU<input v-model="manual.model" placeholder="e.g. ARC-ULTRA-B"></label>
+        <label class="span-2">Product name<input v-model="manual.name" placeholder="e.g. Sonos Arc Ultra soundbar" required></label>
+        <label class="span-2">Description (shown to the client)<textarea v-model="manual.description" rows="2"></textarea></label>
+        <label>Unit price (ex VAT)<MoneyInput v-model="manual.price" /></label>
+        <label>Our cost (optional, internal)<MoneyInput v-model="manual.cost" /></label>
+        <label class="span-2">Image URL (optional)<input v-model="manual.image" placeholder="https://…"></label>
+        <label>Quantity<input type="number" min="1" v-model.number="manual.qty"></label>
+        <label class="check"><input type="checkbox" v-model="manual.save"> Save to Our products for next time</label>
+        <div class="span-2"><button class="btn primary" type="submit">Add item</button></div>
+      </form>
+    </div>
+    <template #footer>
+      <span class="muted">{{ added ? added + ' added to ' + (sectionName || 'this area') : 'Add as many as you like, then click Done.' }}</span>
+      <button class="btn" @click="$emit('close')">Done</button>
+    </template>
+  </Modal>`,
+};
+
+// ---- Quotes list --------------------------------------------------------------
+
+const QuotesList = {
+  data() {
+    return { quotes: [], loading: true, search: '', status: 'all' };
+  },
+  computed: {
+    settings() {
+      return state.settings;
+    },
+    filtered() {
+      const q = this.search.trim().toLowerCase();
+      return this.quotes.filter(
+        (x) =>
+          (this.status === 'all' || x.status === this.status) &&
+          (!q || [x.number, x.title, x.client, x.preparedBy].join(' ').toLowerCase().includes(q)),
+      );
+    },
+    counts() {
+      const c = { all: this.quotes.length, draft: 0, sent: 0, accepted: 0, declined: 0 };
+      for (const q of this.quotes) c[q.status] = (c[q.status] || 0) + 1;
+      return c;
+    },
+    pipeline() {
+      return this.quotes.filter((q) => q.status === 'sent').reduce((s, q) => s + q.subtotal, 0);
+    },
+    won() {
+      return this.quotes.filter((q) => q.status === 'accepted').reduce((s, q) => s + q.subtotal, 0);
+    },
+  },
+  async mounted() {
+    try {
+      this.quotes = await api('GET', '/api/quotes');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      this.loading = false;
+    }
+  },
+  methods: {
+    ...sharedMethods,
+    statusLabel: (s) => STATUS_LABELS[s] || s,
+    open(q) {
+      location.hash = `#/quote/${q.id}`;
+    },
+    async create() {
+      try {
+        const q = await api('POST', '/api/quotes', { preparedBy: state.me });
+        location.hash = `#/quote/${q.id}`;
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
+    async duplicate(q) {
+      try {
+        const copy = await api('POST', `/api/quotes/${q.id}/duplicate`);
+        location.hash = `#/quote/${copy.id}`;
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
+    async remove(q) {
+      if (!confirm(`Delete ${q.number} “${q.title}”? This cannot be undone.`)) return;
+      try {
+        await api('DELETE', `/api/quotes/${q.id}`);
+        this.quotes = this.quotes.filter((x) => x.id !== q.id);
+        toast(`Deleted ${q.number}`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
+  },
+  template: `
+  <div class="page">
+    <div class="page-head">
+      <div>
+        <h1>Quotes</h1>
+        <p class="muted">Build proposals from the Ubiquiti UK catalogue and your own products.</p>
+      </div>
+      <button class="btn primary lg" @click="create">+ New quote</button>
+    </div>
+
+    <div class="notice" v-if="settings && !settings.team.length">
+      Add your names in <a href="#/settings">Settings</a> so they can appear as “Prepared by” on proposals.
+    </div>
+
+    <div class="stats" v-if="quotes.length">
+      <div class="stat"><span>Quotes</span><b>{{ quotes.length }}</b></div>
+      <div class="stat"><span>Sent, awaiting reply</span><b>{{ money(pipeline) }}</b><small>ex VAT</small></div>
+      <div class="stat"><span>Accepted</span><b>{{ money(won) }}</b><small>ex VAT</small></div>
+    </div>
+
+    <div class="toolbar-row" v-if="quotes.length">
+      <div class="chips">
+        <button v-for="s in ['all','draft','sent','accepted','declined']" :key="s" class="chip" :class="{ active: status === s }" @click="status = s">
+          {{ s === 'all' ? 'All' : statusLabel(s) }} <span>{{ counts[s] || 0 }}</span>
+        </button>
+      </div>
+      <input class="search sm" type="search" v-model="search" placeholder="Search quotes">
+    </div>
+
+    <div class="card" v-if="loading"><div class="empty">Loading…</div></div>
+    <div class="card empty-state" v-else-if="!quotes.length">
+      <div class="es-mark"></div>
+      <h2>No quotes yet</h2>
+      <p class="muted">Start a quote, add Ubiquiti equipment, add labour, write your scope and send a branded proposal.</p>
+      <button class="btn primary lg" @click="create">+ New quote</button>
+    </div>
+    <div class="card table-card" v-else>
+      <table class="list">
+        <thead><tr><th>Ref</th><th>Proposal</th><th>Prepared by</th><th>Status</th><th class="num">Total ex VAT</th><th>Updated</th><th></th></tr></thead>
+        <tbody>
+          <tr v-for="q in filtered" :key="q.id" @click="open(q)" class="click">
+            <td class="ref">{{ q.number }}</td>
+            <td><div class="strong">{{ q.title }}</div><div class="muted sm">{{ q.client || 'No client yet' }} · {{ q.items }} line{{ q.items === 1 ? '' : 's' }}</div></td>
+            <td>{{ q.preparedBy || '—' }}</td>
+            <td><span class="pill" :class="q.status">{{ statusLabel(q.status) }}</span></td>
+            <td class="num strong">{{ money(q.subtotal) }}</td>
+            <td class="muted">{{ timeAgo(q.updatedAt) }}</td>
+            <td class="actions" @click.stop>
+              <a class="btn ghost sm" :href="'/p/' + q.id" target="_blank" rel="noopener">View</a>
+              <button class="btn ghost sm" @click="duplicate(q)">Copy</button>
+              <button class="btn ghost sm danger" @click="remove(q)">Delete</button>
+            </td>
+          </tr>
+          <tr v-if="!filtered.length"><td colspan="7" class="empty">No quotes match.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>`,
+};
+
+// ---- Quote editor ------------------------------------------------------------
+
+const QuoteEditor = {
+  components: { MoneyInput, AutoTextarea, ProductPicker, Modal },
+  props: { id: String },
+  data() {
+    return {
+      quote: null,
+      loadError: null,
+      baseUpdatedAt: null,
+      saveState: 'saved',
+      saving: null,
+      conflict: null,
+      tab: 'items',
+      pickerSection: null,
+      labourOpen: {},
+      descOpen: {},
+    };
+  },
+  computed: {
+    settings() {
+      return state.settings;
+    },
+    totals() {
+      return this.quote ? C.quoteTotals(this.quote) : null;
+    },
+    team() {
+      return (this.settings?.team || []).map((m) => m.name).filter(Boolean);
+    },
+    pickerSectionName() {
+      return this.quote?.sections.find((s) => s.id === this.pickerSection)?.name;
+    },
+    // Current store prices by SKU, to spot lines whose price has changed.
+    priceIndex() {
+      const index = {};
+      for (const p of state.catalogue.products) {
+        if (p.source === 'custom') continue;
+        for (const v of p.variants) index[v.sku] = v;
+      }
+      return index;
+    },
+    changedPrices() {
+      if (!this.quote || !state.catalogue.loaded) return [];
+      const out = [];
+      for (const s of this.quote.sections) {
+        for (const item of s.items) {
+          const now = this.storePriceChange(item);
+          if (now) out.push({ item, now });
+        }
+      }
+      return out;
+    },
+    validUntil() {
+      if (!this.quote?.date) return '';
+      const d = new Date(`${this.quote.date}T12:00:00`);
+      d.setDate(d.getDate() + (Number(this.quote.validDays) || 0));
+      return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    },
+    pdfLabel() {
+      return state.session?.pdf === 'print' ? 'Save as PDF' : 'Download PDF';
+    },
+    saveLabel() {
+      return { saved: 'All changes saved', saving: 'Saving…', unsaved: 'Unsaved changes', error: 'Not saved — retrying when you edit', conflict: 'Not saved' }[this.saveState];
+    },
+  },
+  watch: {
+    quote: {
+      deep: true,
+      handler() {
+        if (this.skipWatch) {
+          this.skipWatch = false;
+          return;
+        }
+        this.scheduleSave();
+      },
+    },
+  },
+  async mounted() {
+    loadCatalogue();
+    try {
+      const quote = await api('GET', `/api/quotes/${this.id}`);
+      this.setQuote(quote);
+    } catch (err) {
+      this.loadError = err.message;
+    }
+    this.onUnload = (e) => {
+      if (this.saveState !== 'saved') {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', this.onUnload);
+  },
+  beforeUnmount() {
+    window.removeEventListener('beforeunload', this.onUnload);
+    if (this.saveState === 'unsaved') this.saveNow();
+  },
+  methods: {
+    ...sharedMethods,
+    statusLabel: (s) => STATUS_LABELS[s] || s,
+    setQuote(quote) {
+      // Older or hand-edited quotes may be missing fields.
+      quote.sections ||= [];
+      quote.scope ||= [];
+      quote.display ||= {};
+      quote.client ||= {};
+      for (const s of quote.sections) for (const i of s.items) if (i.kind !== 'labour') i.labour ||= [];
+      this.skipWatch = true;
+      this.quote = quote;
+      this.baseUpdatedAt = quote.updatedAt;
+      this.saveState = 'saved';
+    },
+    scheduleSave() {
+      if (this.saveState === 'conflict') return;
+      this.saveState = 'unsaved';
+      clearTimeout(this.saveTimer);
+      this.saveTimer = setTimeout(() => this.saveNow(), 700);
+    },
+    async saveNow() {
+      clearTimeout(this.saveTimer);
+      if (this.saving) await this.saving;
+      if (!this.quote || !['unsaved', 'error'].includes(this.saveState)) return;
+      this.saveState = 'saving';
+      const payload = clone(this.quote);
+      this.saving = api('PUT', `/api/quotes/${this.quote.id}`, { quote: payload, baseUpdatedAt: this.baseUpdatedAt })
+        .then((saved) => {
+          this.baseUpdatedAt = saved.updatedAt;
+          if (this.saveState === 'saving') this.saveState = 'saved';
+        })
+        .catch((err) => {
+          if (err.status === 409) {
+            this.conflict = err.data.current;
+            this.saveState = 'conflict';
+          } else {
+            this.saveState = 'error';
+            toast(`Could not save: ${err.message}`, 'error');
+          }
+        })
+        .finally(() => {
+          this.saving = null;
+        });
+      await this.saving;
+    },
+    useTheirs() {
+      this.setQuote(this.conflict);
+      this.conflict = null;
+      toast('Loaded the latest version');
+    },
+    keepMine() {
+      this.baseUpdatedAt = this.conflict.updatedAt;
+      this.conflict = null;
+      this.saveState = 'unsaved';
+      this.saveNow();
+    },
+    async copyClientLink() {
+      await this.saveNow();
+      if (await copyText(`${location.origin}/p/${this.quote.id}`)) {
+        toast('Client link copied. Anyone with this link can view (not edit) the proposal.');
+      }
+    },
+    async openProposal(pdf) {
+      const win = window.open('about:blank', '_blank');
+      await this.saveNow();
+      const url = `/p/${this.quote.id}${pdf ? '/pdf' : ''}`;
+      if (win) win.location = url;
+      else location.href = url;
+    },
+    async duplicate() {
+      await this.saveNow();
+      try {
+        const copy = await api('POST', `/api/quotes/${this.quote.id}/duplicate`);
+        location.hash = `#/quote/${copy.id}`;
+        toast(`Created ${copy.number}`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
+    async remove() {
+      if (!confirm(`Delete ${this.quote.number} “${this.quote.title}”? This cannot be undone.`)) return;
+      try {
+        await api('DELETE', `/api/quotes/${this.quote.id}`);
+        this.saveState = 'saved';
+        location.hash = '#/';
+        toast(`Deleted ${this.quote.number}`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
+
+    // Areas
+    addSection() {
+      const n = this.quote.sections.length + 1;
+      this.quote.sections.push({ id: uid(), name: `Area ${n}`, description: '', items: [] });
+      nextTick(() => {
+        const inputs = this.$el.querySelectorAll('.section-name');
+        inputs[inputs.length - 1]?.select();
+      });
+    },
+    removeSection(section) {
+      if (section.items.length && !confirm(`Remove “${section.name}” and its ${section.items.length} line(s)?`)) return;
+      this.quote.sections.splice(this.quote.sections.indexOf(section), 1);
+    },
+    move(list, index, dir) {
+      const to = index + dir;
+      if (to < 0 || to >= list.length) return;
+      const [x] = list.splice(index, 1);
+      list.splice(to, 0, x);
+    },
+
+    // Lines
+    addItem(item) {
+      const section = this.quote.sections.find((s) => s.id === this.pickerSection);
+      if (section) section.items.push(item);
+    },
+    addLabourLine(section) {
+      section.items.push({ id: uid(), kind: 'labour', type: this.quote.labourTypes[0]?.id, hours: 1, description: '' });
+    },
+    removeItem(section, item) {
+      section.items.splice(section.items.indexOf(item), 1);
+    },
+    addLabour(item, typeId) {
+      item.labour.push({ id: uid(), type: typeId, hours: 1 });
+      this.labourOpen[item.id] = false;
+    },
+    removeLabour(item, entry) {
+      item.labour.splice(item.labour.indexOf(entry), 1);
+    },
+    unusedLabour(item) {
+      const used = new Set(item.labour.map((l) => l.type));
+      return this.quote.labourTypes.filter((t) => !used.has(t.id));
+    },
+    itemTotals(item) {
+      return C.itemTotals(item, this.quote);
+    },
+    defaultUnit(item) {
+      return C.unitPrice({ ...item, priceOverride: null }, this.quote);
+    },
+    labourCost(item, entry) {
+      return Math.round(Number(entry.hours || 0) * Number(item.qty || 0) * C.labourRate(this.quote, entry.type));
+    },
+    rateOf(typeId) {
+      return C.labourRate(this.quote, typeId);
+    },
+    storePriceChange(item) {
+      if (item.kind === 'labour' || item.source !== 'ubiquiti') return null;
+      const v = this.priceIndex[item.sku];
+      if (!v) return null;
+      if (v.price === item.basePrice && (v.surcharge || 0) === (item.surcharge || 0)) return null;
+      return v;
+    },
+    applyStorePrice(item) {
+      const v = this.priceIndex[item.sku];
+      if (!v) return;
+      item.basePrice = v.price;
+      item.surcharge = v.surcharge || 0;
+    },
+    applyAllStorePrices() {
+      const n = this.changedPrices.length;
+      for (const { item } of this.changedPrices) this.applyStorePrice(item);
+      toast(`Updated ${n} line${n === 1 ? '' : 's'} to current store prices`);
+    },
+
+    // Proposal text
+    addScope() {
+      this.quote.scope.push({ id: uid(), heading: 'New section', body: '' });
+    },
+    removeScope(s) {
+      if (s.body.trim() && !confirm(`Remove “${s.heading}”?`)) return;
+      this.quote.scope.splice(this.quote.scope.indexOf(s), 1);
+    },
+
+    // Pricing
+    useDefaultRates() {
+      for (const t of this.settings.labourTypes) {
+        const existing = this.quote.labourTypes.find((x) => x.id === t.id);
+        if (existing) {
+          existing.name = t.name;
+          existing.rate = t.rate;
+        } else this.quote.labourTypes.push(clone(t));
+      }
+      toast('Labour rates set to the defaults from Settings');
+    },
+  },
+  template: `
+  <div class="page editor" v-if="loadError">
+    <div class="card empty-state"><h2>Could not open this quote</h2><p class="muted">{{ loadError }}</p><a class="btn" href="#/">Back to quotes</a></div>
+  </div>
+  <div class="page editor" v-else-if="!quote"><div class="empty">Loading…</div></div>
+  <div class="page editor" v-else>
+    <div class="editor-head">
+      <a class="back" href="#/">&larr; Quotes</a>
+      <div class="title-row">
+        <span class="ref">{{ quote.number }}</span>
+        <input class="title-input" v-model="quote.title" placeholder="Proposal title" aria-label="Proposal title">
+        <select class="status-select" :class="quote.status" v-model="quote.status" aria-label="Status">
+          <option v-for="(label, key) in { draft: 'Draft', sent: 'Sent', accepted: 'Accepted', declined: 'Declined' }" :value="key">{{ label }}</option>
+        </select>
+      </div>
+      <div class="head-actions">
+        <span class="save-state" :class="saveState">{{ saveLabel }}</span>
+        <button class="btn ghost" @click="duplicate">Duplicate</button>
+        <button class="btn ghost danger" @click="remove">Delete</button>
+        <button class="btn" @click="copyClientLink" title="A view-only link to this proposal that you can send to the client">Copy client link</button>
+        <button class="btn" @click="openProposal(false)">Preview proposal</button>
+        <button class="btn primary" @click="openProposal(true)">{{ pdfLabel }}</button>
+      </div>
+    </div>
+
+    <nav class="tabs editor-tabs">
+      <button :class="{ active: tab === 'items' }" @click="tab = 'items'">Equipment &amp; labour</button>
+      <button :class="{ active: tab === 'details' }" @click="tab = 'details'">Client &amp; details</button>
+      <button :class="{ active: tab === 'text' }" @click="tab = 'text'">Proposal text</button>
+      <button :class="{ active: tab === 'pricing' }" @click="tab = 'pricing'">Pricing &amp; terms</button>
+    </nav>
+
+    <div class="editor-body">
+      <div class="editor-main">
+
+        <!-- Equipment & labour -->
+        <template v-if="tab === 'items'">
+          <div class="notice" v-if="changedPrices.length">
+            {{ changedPrices.length }} Ubiquiti price{{ changedPrices.length === 1 ? ' has' : 's have' }} changed on the store since {{ changedPrices.length === 1 ? 'it was' : 'they were' }} added.
+            <button class="link" @click="applyAllStorePrices">Update to current prices</button>
+          </div>
+
+          <section class="card area-card" v-for="(section, si) in quote.sections" :key="section.id">
+            <header class="area-head">
+              <span class="area-mark"></span>
+              <input class="section-name" v-model="section.name" placeholder="Area or system name, e.g. Ground floor, Network rack" aria-label="Area name">
+              <span class="area-sum">{{ money(totals.sections[si].total) }}</span>
+              <div class="mini-actions">
+                <button class="icon-btn" title="Move up" @click="move(quote.sections, si, -1)" :disabled="si === 0">↑</button>
+                <button class="icon-btn" title="Move down" @click="move(quote.sections, si, 1)" :disabled="si === quote.sections.length - 1">↓</button>
+                <button class="icon-btn danger" title="Remove area" @click="removeSection(section)">✕</button>
+              </div>
+            </header>
+            <AutoTextarea class="area-desc" plain v-model="section.description" :rows="1" placeholder="Describe this area for the client (optional) — what it covers and why" />
+
+            <div class="lines" v-if="section.items.length">
+              <div class="line-head">
+                <span></span><span>Item</span><span class="c">Qty</span><span class="r">Unit price</span><span class="r">Total</span><span></span>
+              </div>
+              <template v-for="(item, ii) in section.items" :key="item.id">
+
+                <div class="line labour-only" v-if="item.kind === 'labour'">
+                  <div class="thumb labour-thumb"><span></span></div>
+                  <div class="l-main">
+                    <div class="l-name-row">
+                      <select v-model="item.type" class="labour-type">
+                        <option v-for="t in quote.labourTypes" :value="t.id">{{ t.name }}</option>
+                      </select>
+                      <span class="muted sm">{{ money(rateOf(item.type)) }}/hr</span>
+                    </div>
+                    <input class="plain-input" v-model="item.description" placeholder="What this covers, e.g. Site survey and system design">
+                  </div>
+                  <label class="l-qty hours-input"><input type="number" min="0" step="0.25" v-model.number="item.hours" aria-label="Hours"><span>hrs</span></label>
+                  <div class="l-unit r muted">—</div>
+                  <div class="l-total r strong">{{ money(itemTotals(item).total) }}</div>
+                  <div class="l-actions">
+                    <button class="icon-btn" title="Move up" @click="move(section.items, ii, -1)" :disabled="ii === 0">↑</button>
+                    <button class="icon-btn" title="Move down" @click="move(section.items, ii, 1)" :disabled="ii === section.items.length - 1">↓</button>
+                    <button class="icon-btn danger" title="Remove" @click="removeItem(section, item)">✕</button>
+                  </div>
+                </div>
+
+                <div class="line" v-else>
+                  <div class="thumb"><img v-if="item.image" :src="item.image" alt=""></div>
+                  <div class="l-main">
+                    <input class="l-name plain-input" v-model="item.name" aria-label="Item name">
+                    <div class="l-sub">
+                      <span class="src" :class="item.source">{{ item.manufacturer }}</span>
+                      <span>{{ item.sku || item.model }}</span>
+                      <a v-if="item.url" :href="item.url" target="_blank" rel="noopener">store page ↗</a>
+                      <button class="link sm" @click="descOpen[item.id] = !descOpen[item.id]">{{ descOpen[item.id] ? 'Hide description' : 'Description' }}</button>
+                    </div>
+                    <AutoTextarea v-if="descOpen[item.id]" class="l-desc" v-model="item.description" :rows="2" placeholder="Description shown to the client" />
+                    <div class="price-change" v-if="storePriceChange(item)">
+                      Store price now {{ money(storePriceChange(item).price) }}<template v-if="storePriceChange(item).surcharge"> + {{ money(storePriceChange(item).surcharge) }} surcharge</template>
+                      <button class="link sm" @click="applyStorePrice(item)">Update</button>
+                    </div>
+                  </div>
+                  <label class="l-qty"><input type="number" min="0" step="1" v-model.number="item.qty" aria-label="Quantity"></label>
+                  <div class="l-unit r">
+                    <MoneyInput small v-model="item.priceOverride" :placeholder="defaultUnit(item)" />
+                    <div class="price-note" v-if="item.priceOverride != null"><button class="link sm" @click="item.priceOverride = null">Reset to {{ money(defaultUnit(item)) }}</button></div>
+                    <div class="price-note" v-else-if="item.source === 'ubiquiti' && item.surcharge && quote.includeSurcharges !== false">incl. {{ money(item.surcharge) }} surcharge</div>
+                    <div class="price-note" v-else-if="item.source === 'ubiquiti' && quote.markup">store {{ money(item.basePrice + (quote.includeSurcharges !== false ? item.surcharge || 0 : 0)) }} + {{ quote.markup }}%</div>
+                  </div>
+                  <div class="l-total r strong">{{ money(itemTotals(item).equipment) }}</div>
+                  <div class="l-actions">
+                    <button class="icon-btn" title="Move up" @click="move(section.items, ii, -1)" :disabled="ii === 0">↑</button>
+                    <button class="icon-btn" title="Move down" @click="move(section.items, ii, 1)" :disabled="ii === section.items.length - 1">↓</button>
+                    <button class="icon-btn danger" title="Remove" @click="removeItem(section, item)">✕</button>
+                  </div>
+
+                  <div class="labour-row">
+                    <div class="labour-chip" v-for="entry in item.labour" :key="entry.id">
+                      <select v-model="entry.type" aria-label="Labour type">
+                        <option v-for="t in quote.labourTypes" :value="t.id">{{ t.name }}</option>
+                      </select>
+                      <input type="number" min="0" step="0.25" v-model.number="entry.hours" aria-label="Hours">
+                      <span class="muted">{{ item.qty > 1 ? 'hrs each' : 'hrs' }}</span>
+                      <span class="muted" v-if="item.qty > 1">= {{ hours(entry.hours * item.qty) }}</span>
+                      <b>{{ money(labourCost(item, entry)) }}</b>
+                      <button class="icon-btn sm" title="Remove labour" @click="removeLabour(item, entry)">✕</button>
+                    </div>
+                    <template v-if="labourOpen[item.id]">
+                      <button class="chip add" v-for="t in unusedLabour(item)" :key="t.id" @click="addLabour(item, t.id)">+ {{ t.name }}</button>
+                      <button class="link sm" @click="labourOpen[item.id] = false">Cancel</button>
+                    </template>
+                    <button v-else-if="unusedLabour(item).length" class="link sm add-labour" @click="labourOpen[item.id] = true">+ Add labour</button>
+                    <span class="labour-total" v-if="itemTotals(item).labourCost">Labour {{ money(itemTotals(item).labourCost) }}</span>
+                  </div>
+                </div>
+
+              </template>
+            </div>
+            <div class="area-empty" v-else>No items in this area yet.</div>
+
+            <footer class="area-foot">
+              <button class="btn primary" @click="pickerSection = section.id">+ Add product</button>
+              <button class="btn" @click="addLabourLine(section)">+ Add labour line</button>
+              <div class="area-foot-sum">
+                <span>Equipment <b>{{ money(totals.sections[si].equipment) }}</b></span>
+                <span>Labour <b>{{ money(totals.sections[si].labour) }}</b> <small>({{ hours(totals.sections[si].hours) }})</small></span>
+              </div>
+            </footer>
+          </section>
+
+          <button class="btn add-area" @click="addSection">+ Add area or system</button>
+        </template>
+
+        <!-- Client & details -->
+        <template v-if="tab === 'details'">
+          <section class="card">
+            <h2 class="card-title">Proposal</h2>
+            <div class="form-grid">
+              <label class="span-2">Title<input v-model="quote.title" placeholder="e.g. Whole-home WiFi upgrade"></label>
+              <label>Date<input type="date" v-model="quote.date"></label>
+              <label>Valid for (days)<input type="number" min="1" v-model.number="quote.validDays"><small class="muted">Until {{ validUntil }}</small></label>
+              <label>Prepared by
+                <input v-model="quote.preparedBy" list="team-list" placeholder="Your name">
+                <datalist id="team-list"><option v-for="n in team" :value="n"></option></datalist>
+              </label>
+              <label>Status
+                <select v-model="quote.status">
+                  <option v-for="(label, key) in { draft: 'Draft', sent: 'Sent', accepted: 'Accepted', declined: 'Declined' }" :value="key">{{ label }}</option>
+                </select>
+              </label>
+            </div>
+          </section>
+          <section class="card">
+            <h2 class="card-title">Client</h2>
+            <div class="form-grid">
+              <label>Contact name<input v-model="quote.client.name" autocomplete="off"></label>
+              <label>Company (if any)<input v-model="quote.client.company" autocomplete="off"></label>
+              <label>Email<input type="email" v-model="quote.client.email" autocomplete="off"></label>
+              <label>Phone<input v-model="quote.client.phone" autocomplete="off"></label>
+              <label class="span-2">Address<AutoTextarea v-model="quote.client.address" :rows="3" /></label>
+              <label class="span-2">Site address (if different)<AutoTextarea v-model="quote.siteAddress" :rows="2" /></label>
+            </div>
+          </section>
+        </template>
+
+        <!-- Proposal text -->
+        <template v-if="tab === 'text'">
+          <p class="hint">Write in plain text. Leave a blank line for a new paragraph, start a line with “- ” for a bullet point, and wrap words in **double asterisks** for bold. Sections left empty are not shown on the proposal.</p>
+          <section class="card">
+            <h2 class="card-title">Introduction</h2>
+            <AutoTextarea v-model="quote.intro" :rows="4" placeholder="A short opening to the client" />
+          </section>
+          <section class="card scope-card" v-for="(s, i) in quote.scope" :key="s.id">
+            <div class="scope-head">
+              <input class="scope-heading" v-model="s.heading" placeholder="Section heading" aria-label="Section heading">
+              <div class="mini-actions">
+                <button class="icon-btn" title="Move up" @click="move(quote.scope, i, -1)" :disabled="i === 0">↑</button>
+                <button class="icon-btn" title="Move down" @click="move(quote.scope, i, 1)" :disabled="i === quote.scope.length - 1">↓</button>
+                <button class="icon-btn danger" title="Remove" @click="removeScope(s)">✕</button>
+              </div>
+            </div>
+            <AutoTextarea v-model="s.body" :rows="5" :placeholder="'Write the ' + (s.heading || 'section').toLowerCase() + ' here…'" />
+          </section>
+          <button class="btn add-area" @click="addScope">+ Add text section</button>
+          <p class="hint">Each area on the Equipment tab also has its own description, shown above its equipment list.</p>
+        </template>
+
+        <!-- Pricing & terms -->
+        <template v-if="tab === 'pricing'">
+          <section class="card">
+            <div class="card-title-row">
+              <h2 class="card-title">Labour rates for this quote</h2>
+              <button class="link" @click="useDefaultRates">Use default rates from Settings</button>
+            </div>
+            <table class="rates">
+              <thead><tr><th>Labour type</th><th>Rate per hour (ex VAT)</th><th class="num">Hours on quote</th><th class="num">Total</th></tr></thead>
+              <tbody>
+                <tr v-for="t in quote.labourTypes" :key="t.id">
+                  <td><input v-model="t.name" aria-label="Labour type name"></td>
+                  <td><MoneyInput v-model="t.rate" small /></td>
+                  <td class="num">{{ hours((totals.labourByType.find(x => x.id === t.id) || {}).hours || 0) }}</td>
+                  <td class="num strong">{{ money((totals.labourByType.find(x => x.id === t.id) || {}).cost || 0) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">Equipment pricing</h2>
+            <div class="form-grid">
+              <label>Markup on Ubiquiti store prices (%)
+                <input type="number" step="0.5" v-model.number="quote.markup">
+                <small class="muted">Applied to catalogue items without a price you've typed in. Use a negative number for a discount.</small>
+              </label>
+              <label>VAT rate (%)<input type="number" step="0.5" min="0" v-model.number="quote.vatRate"></label>
+              <label class="check span-2"><input type="checkbox" v-model="quote.includeSurcharges">
+                <span>Include Ubiquiti surcharges in prices <small class="muted">— some products carry a surcharge (e.g. “Memory”) that the store adds at checkout on top of the listed price.</small></span>
+              </label>
+            </div>
+            <div class="notice slim" v-if="changedPrices.length">{{ changedPrices.length }} line(s) have a newer store price. <button class="link" @click="applyAllStorePrices">Update them</button></div>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">What the proposal shows</h2>
+            <div class="checks">
+              <label class="check"><input type="checkbox" v-model="quote.display.showImages"> Product images</label>
+              <label class="check"><input type="checkbox" v-model="quote.display.showItemPrices"> Price of each item</label>
+              <label class="check"><input type="checkbox" v-model="quote.display.showSku"> Manufacturer and model numbers</label>
+              <label class="check"><input type="checkbox" v-model="quote.display.showLabourDetail"> Labour under each item <small class="muted">(otherwise labour is shown as a summary)</small></label>
+            </div>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">Terms</h2>
+            <AutoTextarea v-model="quote.terms" :rows="6" placeholder="One term per line" />
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">Internal notes <small class="muted">— never shown to the client</small></h2>
+            <AutoTextarea v-model="quote.notes" :rows="3" placeholder="Notes for the team" />
+          </section>
+        </template>
+      </div>
+
+      <aside class="editor-side">
+        <div class="card summary">
+          <h3>Summary</h3>
+          <div class="sum-row"><span>Equipment</span><b>{{ money(totals.equipment) }}</b></div>
+          <div class="sum-row"><span>Labour <small>{{ hours(totals.labourHours) }}</small></span><b>{{ money(totals.labour) }}</b></div>
+          <div class="sum-sub" v-for="l in totals.labourByType.filter(x => x.hours > 0)" :key="l.id">
+            <span>{{ l.name }} · {{ hours(l.hours) }}</span><span>{{ money(l.cost) }}</span>
+          </div>
+          <div class="sum-row sep"><span>Subtotal</span><b>{{ money(totals.subtotal) }}</b></div>
+          <div class="sum-row"><span>VAT {{ totals.vatRate }}%</span><b>{{ money(totals.vat) }}</b></div>
+          <div class="sum-total"><span>Total inc VAT</span><strong>{{ money(totals.total) }}</strong></div>
+          <div class="sum-internal" v-if="totals.equipment !== totals.equipmentCost && totals.equipmentCost">
+            Internal: equipment at store prices / our costs is {{ money(totals.equipmentCost) }}, so equipment margin is {{ money(totals.equipment - totals.equipmentCost) }}
+          </div>
+          <div class="side-actions">
+            <button class="btn" @click="openProposal(false)">Preview</button>
+            <button class="btn primary" @click="openProposal(true)">PDF</button>
+            <button class="btn ghost span-2" @click="copyClientLink">Copy client link</button>
+          </div>
+        </div>
+        <div class="card side-meta">
+          <div><span>Client</span>{{ quote.client.company || quote.client.name || '—' }}</div>
+          <div><span>Prepared by</span>{{ quote.preparedBy || '—' }}</div>
+          <div><span>Valid until</span>{{ validUntil }}</div>
+          <a class="link sm" href="#" @click.prevent="tab = 'details'">Edit details</a>
+        </div>
+      </aside>
+    </div>
+
+    <ProductPicker v-if="pickerSection" :section-name="pickerSectionName" @add="addItem" @close="pickerSection = null" />
+
+    <Modal v-if="conflict" title="This quote was changed by someone else" @close="useTheirs">
+      <p>While you were editing, another person saved changes to {{ quote.number }} ({{ formatDateTime(conflict.updatedAt) }}).</p>
+      <p class="muted">Load their version to see their changes (your unsaved edits will be lost), or keep yours and replace theirs.</p>
+      <template #footer>
+        <button class="btn" @click="keepMine">Keep mine</button>
+        <button class="btn primary" @click="useTheirs">Load their version</button>
+      </template>
+    </Modal>
+  </div>`,
+};
+
+// ---- Products page ----------------------------------------------------------------
+
+const ProductsPage = {
+  components: { MoneyInput, Modal },
+  data() {
+    return { tab: 'ubiquiti', q: '', category: '', limit: 60, editing: null };
+  },
+  computed: {
+    cat() {
+      return state.catalogue;
+    },
+    ubiquiti() {
+      return this.cat.sources.find((s) => s.id === 'ubiquiti') || {};
+    },
+    pool() {
+      return this.cat.products.filter((p) => (this.tab === 'custom' ? p.source === 'custom' : p.source === 'ubiquiti'));
+    },
+    categories() {
+      return [...new Set(this.pool.map((p) => p.category))].sort();
+    },
+    matches() {
+      return searchProducts(this.pool, this.q, this.category);
+    },
+  },
+  watch: {
+    tab() {
+      this.category = '';
+      this.limit = 60;
+    },
+  },
+  mounted() {
+    loadCatalogue();
+  },
+  methods: {
+    ...sharedMethods,
+    sync: syncUbiquiti,
+    statusBadge: (s) => STATUS_BADGE[s],
+    newProduct() {
+      this.editing = { id: null, manufacturer: '', name: '', model: '', description: '', category: '', price: null, cost: null, image: '', url: '' };
+    },
+    edit(p) {
+      this.editing = { id: p.id, manufacturer: p.manufacturer, name: p.name, model: p.model, description: p.description, category: p.category, price: p.price, cost: p.cost, image: p.image || '', url: p.url || '' };
+    },
+    async save() {
+      const e = this.editing;
+      if (!e.name.trim()) return toast('Give the product a name', 'error');
+      try {
+        if (e.id) await api('PUT', `/api/products/custom/${encodeURIComponent(e.id)}`, e);
+        else await api('POST', '/api/products/custom', e);
+        this.editing = null;
+        await loadCatalogue(true);
+        toast('Product saved');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
+    async remove(p) {
+      if (!confirm(`Delete “${p.name}” from Our products? Existing quotes keep their copy.`)) return;
+      try {
+        await api('DELETE', `/api/products/custom/${encodeURIComponent(p.id)}`);
+        await loadCatalogue(true);
+        toast('Product deleted');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
+  },
+  template: `
+  <div class="page">
+    <div class="page-head">
+      <div><h1>Products</h1><p class="muted">The catalogue the quote builder draws from.</p></div>
+      <button v-if="tab === 'custom'" class="btn primary lg" @click="newProduct">+ Add product</button>
+    </div>
+
+    <nav class="tabs">
+      <button :class="{ active: tab === 'ubiquiti' }" @click="tab = 'ubiquiti'">Ubiquiti UK store</button>
+      <button :class="{ active: tab === 'custom' }" @click="tab = 'custom'">Our products <span class="count">{{ cat.products.filter(p => p.source === 'custom').length }}</span></button>
+    </nav>
+
+    <div class="card source-card" v-if="tab === 'ubiquiti'">
+      <div>
+        <div class="strong">{{ ubiquiti.count || 0 }} products from <a :href="ubiquiti.sourceUrl || 'https://uk.store.ui.com/uk/en'" target="_blank" rel="noopener">uk.store.ui.com</a></div>
+        <div class="muted sm" v-if="cat.syncing || ubiquiti.syncing">Updating from the store — this takes about 10 seconds…</div>
+        <div class="muted sm" v-else-if="ubiquiti.fetchedAt">Prices last updated {{ formatDateTime(ubiquiti.fetchedAt) }} ({{ timeAgo(ubiquiti.fetchedAt) }}). Refreshes automatically once a day. Prices exclude VAT.</div>
+        <div class="error-text sm" v-if="ubiquiti.error">Last refresh had a problem: {{ ubiquiti.error }}</div>
+      </div>
+      <button class="btn" @click="sync" :disabled="cat.syncing || ubiquiti.syncing">{{ cat.syncing || ubiquiti.syncing ? 'Updating…' : 'Refresh prices now' }}</button>
+    </div>
+
+    <div class="toolbar-row">
+      <input class="search" type="search" v-model="q" placeholder="Search by name, model or SKU">
+      <select v-model="category"><option value="">All categories</option><option v-for="c in categories" :value="c">{{ c }}</option></select>
+      <span class="muted sm">{{ matches.length }} product{{ matches.length === 1 ? '' : 's' }}</span>
+    </div>
+
+    <div class="card table-card">
+      <div class="empty" v-if="cat.loading && !cat.loaded">Loading…</div>
+      <div class="empty" v-else-if="!matches.length">
+        <template v-if="tab === 'custom' && !pool.length">No products yet. Add products from other manufacturers here so you can reuse them on quotes.</template>
+        <template v-else>No products match.</template>
+      </div>
+      <table class="list products" v-else>
+        <thead><tr><th></th><th>Product</th><th>Category</th><th class="num">Price ex VAT</th><th></th></tr></thead>
+        <tbody>
+          <tr v-for="p in matches.slice(0, limit)" :key="p.id">
+            <td class="thumb-cell"><div class="thumb"><img v-if="p.image" :src="p.image" alt="" loading="lazy"></div></td>
+            <td>
+              <div class="strong">{{ p.name }}</div>
+              <div class="muted sm">{{ p.manufacturer }} · {{ p.model }}<span v-if="p.variants.length > 1"> · {{ p.variants.length }} options</span></div>
+            </td>
+            <td class="muted">{{ p.category }}<span v-if="p.subCategory"> / {{ p.subCategory }}</span></td>
+            <td class="num">
+              <span class="strong">{{ p.variants.length > 1 ? 'from ' : '' }}{{ money(Math.min(...p.variants.map(v => v.price))) }}</span>
+              <div class="muted sm" v-if="p.variants[0].surcharge">+ surcharge</div>
+              <span class="badge warn" v-if="statusBadge(p.status)">{{ statusBadge(p.status) }}</span>
+            </td>
+            <td class="actions">
+              <a v-if="p.url" class="btn ghost sm" :href="p.url" target="_blank" rel="noopener">Store ↗</a>
+              <template v-if="p.source === 'custom'">
+                <button class="btn ghost sm" @click="edit(p)">Edit</button>
+                <button class="btn ghost sm danger" @click="remove(p)">Delete</button>
+              </template>
+            </td>
+          </tr>
+          <tr v-if="matches.length > limit"><td colspan="5" class="more"><button class="btn ghost" @click="limit += 60">Show more</button></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <Modal v-if="editing" :title="editing.id ? 'Edit product' : 'Add product'" @close="editing = null">
+      <form class="form-grid" @submit.prevent="save" id="product-form">
+        <label>Manufacturer<input v-model="editing.manufacturer" placeholder="e.g. Sonos"></label>
+        <label>Model / SKU<input v-model="editing.model"></label>
+        <label class="span-2">Product name<input v-model="editing.name" required></label>
+        <label class="span-2">Description (shown to the client)<textarea v-model="editing.description" rows="3"></textarea></label>
+        <label>Category<input v-model="editing.category" placeholder="e.g. Audio, Lighting, Cabling"></label>
+        <label>Unit price (ex VAT)<MoneyInput v-model="editing.price" /></label>
+        <label>Our cost (optional, internal)<MoneyInput v-model="editing.cost" /></label>
+        <label>Product page link (optional)<input v-model="editing.url" placeholder="https://…"></label>
+        <label class="span-2">Image URL (optional)<input v-model="editing.image" placeholder="https://…"></label>
+      </form>
+      <template #footer>
+        <button class="btn" @click="editing = null">Cancel</button>
+        <button class="btn primary" type="submit" form="product-form">Save product</button>
+      </template>
+    </Modal>
+  </div>`,
+};
+
+// ---- Settings page --------------------------------------------------------------
+
+const SettingsPage = {
+  components: { MoneyInput, AutoTextarea },
+  data() {
+    return { s: clone(state.settings), saving: false, dirty: false };
+  },
+  watch: {
+    s: {
+      deep: true,
+      handler() {
+        if (this.ready) this.dirty = true;
+      },
+    },
+  },
+  mounted() {
+    nextTick(() => (this.ready = true));
+  },
+  methods: {
+    isCore: (id) => CORE_LABOUR.includes(id),
+    addMember() {
+      this.s.team.push({ name: '', role: '', email: '', phone: '' });
+    },
+    addLabourType() {
+      this.s.labourTypes.push({ id: `labour_${uid()}`, name: 'New labour type', rate: 5000 });
+    },
+    addScope() {
+      this.s.defaultScope.push({ heading: 'New section', body: '' });
+    },
+    async save() {
+      this.saving = true;
+      try {
+        this.s.team = this.s.team.filter((m) => m.name.trim());
+        const saved = await api('PUT', '/api/settings', this.s);
+        state.settings = saved;
+        this.s = clone(saved);
+        nextTick(() => (this.dirty = false));
+        toast('Settings saved');
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        this.saving = false;
+      }
+    },
+  },
+  template: `
+  <div class="page settings">
+    <div class="page-head">
+      <div><h1>Settings</h1><p class="muted">Defaults for new quotes. Existing quotes keep their own copies of rates and text.</p></div>
+      <button class="btn primary lg" @click="save" :disabled="saving">{{ saving ? 'Saving…' : dirty ? 'Save changes' : 'Saved' }}</button>
+    </div>
+
+    <section class="card">
+      <h2 class="card-title">Your team</h2>
+      <p class="muted sm">People who prepare quotes. Their details appear on proposals they prepare.</p>
+      <div class="team-row" v-for="(m, i) in s.team" :key="i">
+        <input v-model="m.name" placeholder="Name" aria-label="Name">
+        <input v-model="m.role" placeholder="Role (optional)" aria-label="Role">
+        <input v-model="m.email" placeholder="Email" aria-label="Email">
+        <input v-model="m.phone" placeholder="Phone" aria-label="Phone">
+        <button class="icon-btn danger" title="Remove" @click="s.team.splice(i, 1)">✕</button>
+      </div>
+      <button class="btn" @click="addMember">+ Add person</button>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">Labour types and default hourly rates</h2>
+      <p class="muted sm">Rates exclude VAT. New quotes start with these; each quote can change its own rates.</p>
+      <div class="rate-row" v-for="(t, i) in s.labourTypes" :key="t.id">
+        <input v-model="t.name" aria-label="Labour type name">
+        <MoneyInput v-model="t.rate" />
+        <span class="muted sm">per hour</span>
+        <button v-if="!isCore(t.id)" class="icon-btn danger" title="Remove" @click="s.labourTypes.splice(i, 1)">✕</button>
+        <span v-else class="icon-btn-spacer"></span>
+      </div>
+      <button class="btn" @click="addLabourType">+ Add labour type</button>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">Company details (shown on proposals)</h2>
+      <div class="form-grid">
+        <label>Company name<input v-model="s.company.name"></label>
+        <label>Tagline<input v-model="s.company.tagline"></label>
+        <label class="span-2">Address<AutoTextarea v-model="s.company.address" :rows="3" /></label>
+        <label>Phone<input v-model="s.company.phone"></label>
+        <label>Email<input v-model="s.company.email"></label>
+        <label>Website<input v-model="s.company.website"></label>
+        <label>Company number<input v-model="s.company.companyNumber"></label>
+        <label>VAT number<input v-model="s.company.vatNumber"></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">Quote defaults</h2>
+      <div class="form-grid">
+        <label>Quote number prefix<input v-model="s.quotePrefix"><small class="muted">Next quote: {{ s.quotePrefix }}{{ String(s.nextQuoteNumber).padStart(4, '0') }}</small></label>
+        <label>Valid for (days)<input type="number" min="1" v-model.number="s.validDays"></label>
+        <label>VAT rate (%)<input type="number" min="0" step="0.5" v-model.number="s.vatRate"></label>
+        <label>Markup on Ubiquiti store prices (%)<input type="number" step="0.5" v-model.number="s.markup"></label>
+        <label class="check span-2"><input type="checkbox" v-model="s.includeSurcharges"> Include Ubiquiti surcharges in prices</label>
+      </div>
+      <h3 class="sub-title">What proposals show</h3>
+      <div class="checks">
+        <label class="check"><input type="checkbox" v-model="s.display.showImages"> Product images</label>
+        <label class="check"><input type="checkbox" v-model="s.display.showItemPrices"> Price of each item</label>
+        <label class="check"><input type="checkbox" v-model="s.display.showSku"> Manufacturer and model numbers</label>
+        <label class="check"><input type="checkbox" v-model="s.display.showLabourDetail"> Labour under each item</label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">Default proposal text</h2>
+      <label class="stack">Introduction<AutoTextarea v-model="s.defaultIntro" :rows="3" /></label>
+      <label class="stack">Starting text sections (headings for new quotes)</label>
+      <div class="rate-row" v-for="(sc, i) in s.defaultScope" :key="i">
+        <input v-model="sc.heading" aria-label="Section heading">
+        <button class="icon-btn danger" title="Remove" @click="s.defaultScope.splice(i, 1)">✕</button>
+      </div>
+      <button class="btn" @click="addScope">+ Add section</button>
+      <label class="stack">Terms (one per line)<AutoTextarea v-model="s.defaultTerms" :rows="6" /></label>
+      <p class="muted sm">These are example terms — please check them before sending proposals.</p>
+    </section>
+  </div>`,
+};
+
+// ---- App shell ---------------------------------------------------------------------
+
+const App = {
+  components: { QuotesList, QuoteEditor, ProductsPage, SettingsPage },
+  computed: {
+    route: () => state.route,
+    toasts: () => state.toasts,
+    ready: () => !!state.settings,
+    session: () => state.session,
+    setupMessage: () => state.setupMessage,
+    team() {
+      return (state.settings?.team || []).map((m) => m.name).filter(Boolean);
+    },
+    me: {
+      get: () => state.me,
+      set(v) {
+        state.me = v;
+        storageSet('mesh.me', v);
+      },
+    },
+  },
+  async mounted() {
+    try {
+      state.session = await api('GET', '/api/session');
+    } catch (err) {
+      return toast(`Could not reach the server: ${err.message}`, 'error');
+    }
+    if (state.session.setupMessage) {
+      state.setupMessage = state.session.setupMessage;
+      return;
+    }
+    if (!state.session.signedIn) return goToSignIn();
+    try {
+      state.settings = await api('GET', '/api/settings');
+    } catch (err) {
+      if (err.status !== 401) toast(`Could not load settings: ${err.message}`, 'error');
+    }
+  },
+  methods: {
+    async signOut() {
+      await api('POST', '/api/logout').catch(() => {});
+      location.href = '/login.html';
+    },
+  },
+  template: `
+  <header class="app-header">
+    <a href="#/" class="brand"><img src="/img/mesh-logo-white.png" alt="Mesh"><span>Quotes</span></a>
+    <nav>
+      <a href="#/" :class="{ active: route.name === 'quotes' || route.name === 'quote' }">Quotes</a>
+      <a href="#/products" :class="{ active: route.name === 'products' }">Products</a>
+      <a href="#/settings" :class="{ active: route.name === 'settings' }">Settings</a>
+    </nav>
+    <label class="me" v-if="team.length">
+      <span>You are</span>
+      <select v-model="me"><option value="">—</option><option v-for="n in team" :value="n">{{ n }}</option></select>
+    </label>
+    <button v-if="session && session.authEnabled" class="sign-out" @click="signOut">Sign out</button>
+  </header>
+  <div class="page" v-if="setupMessage">
+    <div class="card empty-state">
+      <div class="es-mark"></div>
+      <h2>One more setup step</h2>
+      <p class="muted">{{ setupMessage }}</p>
+      <p class="muted sm">The README in the GitHub repo walks through the Vercel setup.</p>
+    </div>
+  </div>
+  <main v-else-if="ready">
+    <QuotesList v-if="route.name === 'quotes'" />
+    <QuoteEditor v-else-if="route.name === 'quote'" :id="route.id" :key="route.id" />
+    <ProductsPage v-else-if="route.name === 'products'" />
+    <SettingsPage v-else-if="route.name === 'settings'" />
+  </main>
+  <div class="toasts" aria-live="polite">
+    <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type">{{ t.msg }}</div>
+  </div>`,
+};
+
+createApp(App).mount('#app');
