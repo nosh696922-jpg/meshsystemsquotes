@@ -110,8 +110,34 @@ const CORE_LABOUR = ['installation', 'commissioning', 'programming', 'project_ma
 
 // ---- Shared state ------------------------------------------------------------
 
+// ---- Light / dark mode ----------------------------------------------------------
+// index.html sets the starting theme before the page draws (no flash). The
+// choice is remembered on this device; until someone flips the switch, it
+// follows the device's own light/dark setting.
+
+const THEME_KEY = 'mesh.theme';
+let themeTimer = null;
+
+function applyTheme(theme, animate) {
+  const root = document.documentElement;
+  if (animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    root.classList.add('theme-transition');
+    clearTimeout(themeTimer);
+    themeTimer = setTimeout(() => root.classList.remove('theme-transition'), 450);
+  }
+  root.setAttribute('data-theme', theme);
+}
+
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+systemDark.addEventListener?.('change', (e) => {
+  if (storageGet(THEME_KEY)) return; // someone chose a mode on purpose
+  state.theme = e.matches ? 'dark' : 'light';
+  applyTheme(state.theme, true);
+});
+
 const state = reactive({
   route: parseRoute(),
+  theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light',
   session: null,
   setupMessage: null,
   settings: null,
@@ -172,6 +198,11 @@ async function syncUbiquiti() {
   } finally {
     state.catalogue.syncing = false;
   }
+}
+
+async function signOut() {
+  await api('POST', '/api/logout').catch(() => {});
+  location.href = '/login.html';
 }
 
 async function copyText(text) {
@@ -1374,7 +1405,11 @@ const SettingsPage = {
   mounted() {
     nextTick(() => (this.ready = true));
   },
+  computed: {
+    session: () => state.session,
+  },
   methods: {
+    signOut,
     isCore: (id) => CORE_LABOUR.includes(id),
     addMember() {
       this.s.team.push({ name: '', role: '', email: '', phone: '' });
@@ -1407,6 +1442,11 @@ const SettingsPage = {
       <div><h1>Settings</h1><p class="muted">Defaults for new quotes. Existing quotes keep their own copies of rates and text.</p></div>
       <button class="btn primary lg" @click="save" :disabled="saving">{{ saving ? 'Saving…' : dirty ? 'Save changes' : 'Saved' }}</button>
     </div>
+
+    <section class="card account-card" v-if="session && session.authEnabled">
+      <div><div class="strong">Signed in</div><div class="muted sm">You stay signed in on this device for 30 days.</div></div>
+      <button class="btn" @click="signOut">Sign out</button>
+    </section>
 
     <section class="card">
       <h2 class="card-title">Your team</h2>
@@ -1481,10 +1521,28 @@ const SettingsPage = {
   </div>`,
 };
 
+// ---- The light switch ---------------------------------------------------------------
+
+const LightSwitch = {
+  props: { modelValue: String },
+  emits: ['update:modelValue'],
+  computed: {
+    on() {
+      return this.modelValue !== 'dark';
+    },
+  },
+  template: `
+    <button type="button" class="light-switch" :class="modelValue" role="switch" :aria-checked="on ? 'true' : 'false'"
+      aria-label="Light mode" :title="on ? 'Turn the lights off (dark mode)' : 'Turn the lights on (light mode)'"
+      @click="$emit('update:modelValue', on ? 'dark' : 'light')">
+      <span class="ls-plate" aria-hidden="true"><span class="ls-rocker"></span></span>
+    </button>`,
+};
+
 // ---- App shell ---------------------------------------------------------------------
 
 const App = {
-  components: { QuotesList, QuoteEditor, ProductsPage, SettingsPage },
+  components: { QuotesList, QuoteEditor, ProductsPage, SettingsPage, LightSwitch },
   computed: {
     route: () => state.route,
     toasts: () => state.toasts,
@@ -1499,6 +1557,14 @@ const App = {
       set(v) {
         state.me = v;
         storageSet('mesh.me', v);
+      },
+    },
+    theme: {
+      get: () => state.theme,
+      set(v) {
+        state.theme = v;
+        storageSet(THEME_KEY, v);
+        applyTheme(v, true);
       },
     },
   },
@@ -1519,12 +1585,7 @@ const App = {
       if (err.status !== 401) toast(`Could not load settings: ${err.message}`, 'error');
     }
   },
-  methods: {
-    async signOut() {
-      await api('POST', '/api/logout').catch(() => {});
-      location.href = '/login.html';
-    },
-  },
+  methods: { signOut },
   template: `
   <header class="app-header">
     <a href="#/" class="brand"><img src="/img/mesh-logo-white.png" alt="Mesh"><span>Quotes</span></a>
@@ -1533,11 +1594,14 @@ const App = {
       <a href="#/products" :class="{ active: route.name === 'products' }">Products</a>
       <a href="#/settings" :class="{ active: route.name === 'settings' }">Settings</a>
     </nav>
-    <label class="me" v-if="team.length">
-      <span>You are</span>
-      <select v-model="me"><option value="">—</option><option v-for="n in team" :value="n">{{ n }}</option></select>
-    </label>
-    <button v-if="session && session.authEnabled" class="sign-out" @click="signOut">Sign out</button>
+    <div class="header-right">
+      <label class="me" v-if="team.length">
+        <span>You are</span>
+        <select v-model="me"><option value="">—</option><option v-for="n in team" :value="n">{{ n }}</option></select>
+      </label>
+      <button v-if="session && session.authEnabled" class="sign-out" @click="signOut">Sign out</button>
+      <LightSwitch v-model="theme" />
+    </div>
   </header>
   <div class="page" v-if="setupMessage">
     <div class="card empty-state">

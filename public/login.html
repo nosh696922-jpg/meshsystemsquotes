@@ -5,10 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Sign in · Mesh Quotes</title>
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('mesh.theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
   <link rel="icon" href="/img/favicon.png">
   <link rel="stylesheet" href="/styles.css">
   <style>
-    body { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--charcoal); padding: 16px; }
+    html, body { background: var(--header-bg); }
+    body { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .light-switch { position: fixed; top: 10px; right: 12px; }
     .signin { width: 100%; max-width: 380px; }
     .signin .logo { display: block; height: 34px; margin: 0 auto 28px; }
     .signin .card { padding: 28px; }
@@ -20,6 +30,9 @@
   </style>
 </head>
 <body>
+  <button type="button" class="light-switch" id="light-switch" role="switch" aria-label="Light mode">
+    <span class="ls-plate" aria-hidden="true"><span class="ls-rocker"></span></span>
+  </button>
   <main class="signin">
     <img class="logo" src="/img/mesh-logo-white.png" alt="Mesh">
     <form class="card" id="form">
@@ -31,6 +44,27 @@
     </form>
   </main>
   <script>
+    // Light switch (same as in the app, remembered on this device).
+    const lightSwitch = document.getElementById('light-switch');
+    function showSwitch() {
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      lightSwitch.classList.toggle('dark', dark);
+      lightSwitch.setAttribute('aria-checked', dark ? 'false' : 'true');
+      lightSwitch.title = dark ? 'Turn the lights on (light mode)' : 'Turn the lights off (dark mode)';
+    }
+    lightSwitch.addEventListener('click', () => {
+      const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      const root = document.documentElement;
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        root.classList.add('theme-transition');
+        setTimeout(() => root.classList.remove('theme-transition'), 450);
+      }
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('mesh.theme', next); } catch (e) {}
+      showSwitch();
+    });
+    showSwitch();
+
     const form = document.getElementById('form');
     const error = document.getElementById('error');
     const submit = document.getElementById('submit');

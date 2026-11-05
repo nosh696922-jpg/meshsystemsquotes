@@ -221,7 +221,30 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   .cover::before { height: 150px; }
   .cover::after { bottom: 170px; right: 20px; }
   .parties, .investment { grid-template-columns: 1fr; }
-  table.items .img { display: none; }
-  table.items .num { width: auto; }
   .toolbar { padding: 10px 16px; }
+  .cover-top { flex-direction: column; gap: 8px; }
+  .cover-logo { width: 130px; }
+  .cover-tag { padding-top: 0; }
+
+  /* Stack each line: name on top, then "6 × £154.00   £924.00". */
+  table.items thead { display: none; }
+  table.items, table.items tbody, table.items tfoot { display: block; }
+  table.items tr.item, table.items tr.sub-labour {
+    display: grid; grid-template-columns: auto auto 1fr; column-gap: 10px; align-items: baseline;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+  }
+  table.items tr.has-labour { border-bottom: none; padding-bottom: 4px; }
+  table.items tr.sub-labour { padding: 2px 0 6px 12px; border-bottom: none; }
+  table.items tr.sub-labour:has(+ tr.item), table.items tr.sub-labour:last-child { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+  table.items td { display: block; padding: 0; border: none !important; width: auto !important; }
+  table.items td.img { display: none; }
+  table.items td.desc { grid-column: 1 / -1; margin-bottom: 4px; padding-left: 0 !important; }
+  table.items tr.sub-labour td.desc::before { display: none; }
+  table.items td.qty { text-align: left; color: var(--muted); }
+  table.items td.qty::after { content: ' ×'; }
+  table.items td.num { text-align: left; color: var(--muted); }
+  table.items td.total { text-align: right; color: var(--ink); }
+  table.items tr.item:not(:has(td.num)) td.qty::after { content: ''; }
+  table.items tfoot tr, table.items tfoot td { display: block; }
+  .area-total { flex-wrap: wrap; justify-content: flex-start; gap: 4px 16px; }
 }
