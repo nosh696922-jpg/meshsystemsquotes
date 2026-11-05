@@ -132,6 +132,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v3` | Lighter, simpler proposal and PDF design (no dark panels), printing on fewer pages: the cover details sit on page 1, with an optional separate cover page |
 | `v3.1` | Adds “Start again from 0001” in Settings, to reset quote numbers (and optionally delete all quotes) after testing |
 | `v3.2` | The quoting app restyled to match the Mesh website (navy header, page tops with moving nodes, Inter and Poppins), smoother light/dark switching and animations throughout, and no box around clicked tick boxes |
+| `v3.3` | The client proposal in the website’s colours (navy top bar and moving nodes on screen; printing stays light), the Labour section shows only each service and its total (no hours or hourly rates), and **Download PDF** works again on your own computer |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s
