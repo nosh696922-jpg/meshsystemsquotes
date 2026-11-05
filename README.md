@@ -34,6 +34,13 @@ but treat them like a private document: only send them to the client.
 Online, **Save as PDF** opens the browser’s print window; choose *Save as PDF*
 as the printer.
 
+Copying the link marks the quote as **Sent**. On the link, the client can
+**accept** (name, optional PO number, tick to agree), **request changes** or
+**decline**. Their reply sets the quote’s status and shows at the top of the
+quote and in the quotes list. The **History** tab shows when they opened it
+(your team’s own views, and link previews in WhatsApp, email and so on, don’t
+count).
+
 ### What runs on Vercel
 
 - Quotes, settings and your products are stored in Upstash Redis.
@@ -71,6 +78,19 @@ PDF directly using Edge or Chrome.
   paragraph, `- ` = bullet, `**bold**`.
 - **Pricing** – edit any unit price, apply a markup to store prices, set labour
   rates and VAT per quote. Lines whose store price has changed are flagged.
+- **Discounts** – a percentage off any item, and a percentage or fixed amount off
+  the whole quote, with your own name for it (e.g. “Package saving”). The
+  proposal shows what the client saves.
+- **Profit** – a panel only your team sees: profit and margin on equipment and
+  labour. Set what labour costs you per hour, and your trade discount off
+  Ubiquiti store prices, in Settings; type a cost on any item to override.
+- **Kits** – save an area’s items and labour as a kit (e.g. “Standard WiFi
+  room”) and add it to any quote in one click from **Add product → Kits**.
+- **Versions** – a version is saved when you send the link and when the client
+  replies; save your own any time. See what changed since any version, or go
+  back to it.
+- **Proposal layout** – list every item with prices, or show only what’s in each
+  area with one price per area.
 - **Two people** – if you both edit the same quote at once, the second person to
   save is warned and can load the other’s changes or keep their own.
 
@@ -85,6 +105,8 @@ PDF directly using Edge or Chrome.
 | `lib/store.js`, `lib/storage/` | Saving data (files locally, Upstash online) |
 | `lib/catalogues/ubiquiti.js` | Reads the Ubiquiti UK store |
 | `lib/proposal.js`, `public/proposal.css` | The client-facing proposal |
+| `lib/client.js` | Client views and replies (accept, changes, decline) |
+| `lib/revisions.js`, `lib/kits.js` | Saved versions of quotes, and kits |
 | `lib/pdf.js` | One-click PDF via Edge/Chrome (local only) |
 | `public/app.js`, `public/styles.css` | The quoting app |
 | `public/shared/calc.js` | Pricing maths, shared by app and proposal |
@@ -94,6 +116,26 @@ PDF directly using Edge or Chrome.
 Create a file in `lib/catalogues/` that exports `{ id, name, sync() }`, where
 `sync()` returns products in the same shape as the Ubiquiti one, then add it to
 `SOURCES` in `lib/catalogue.js`.
+
+## Rolling back to an earlier version
+
+Each release is tagged on GitHub (the repo’s **Tags** list):
+
+| Tag | What it is |
+| --- | --- |
+| `v1` | Before discounts, profit, client replies, view tracking, versions and kits |
+| `v2` | Adds those features |
+
+- **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
+  of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s
+  live in seconds and the code isn’t changed. Undo it the same way.
+- **Permanent, in GitHub:** `git revert --no-edit v1..v2`, then `git push`. Vercel
+  then deploys the old version. To bring the features back, revert that revert.
+
+Rolling back deletes nothing. The older version ignores the newer information
+(client replies, views, saved versions, kits, labour costs) and it reappears when
+you move forward again. While on `v1`, quotes with a discount show without it,
+and a quote marked “Changes requested” shows no status until you pick one.
 
 ## Known limits of this proof of concept
 

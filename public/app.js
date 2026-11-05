@@ -100,13 +100,96 @@ function itemFromProduct(product, variant, qty) {
     surcharge: variant.surcharge || 0,
     costPrice: product.cost ?? null,
     priceOverride: null,
+    discount: 0,
     qty: Math.max(1, Number(qty) || 1),
     labour: [],
   };
 }
 
-const STATUS_LABELS = { draft: 'Draft', sent: 'Sent', accepted: 'Accepted', declined: 'Declined' };
+const STATUS_LABELS = { draft: 'Draft', sent: 'Sent', changes: 'Changes requested', accepted: 'Accepted', declined: 'Declined' };
+const STATUS_KEYS = Object.keys(STATUS_LABELS);
 const CORE_LABOUR = ['installation', 'commissioning', 'programming', 'project_management'];
+const REPLY_LABELS = { accept: 'Accepted online', changes: 'Changes requested', decline: 'Declined online' };
+const REPLY_STATUS = { accept: 'accepted', changes: 'changes', decline: 'declined' };
+const VERSION_KINDS = { manual: 'Saved', sent: 'Sent to client', accept: 'Client accepted', changes: 'Client asked for changes', decline: 'Client declined', restore: 'Before going back' };
+
+// Copy saved items into a quote with fresh ids (for kits).
+function freshItems(items) {
+  return clone(items).map((item) => {
+    item.id = uid();
+    if (item.kind !== 'labour') item.labour = (item.labour || []).map((l) => ({ ...l, id: uid() }));
+    return item;
+  });
+}
+
+// What changed between two versions of a quote, as a list of plain sentences.
+function diffQuotes(before, after) {
+  const out = [];
+  const add = (type, text) => out.push({ type, text });
+  const itemLabel = (i) => (i.kind === 'labour' ? `${C.labourName(after, i.type) || 'Labour'} labour${i.description ? ` (${i.description})` : ''}` : i.name);
+  const index = (q) => {
+    const map = new Map();
+    for (const s of q.sections || []) for (const i of s.items || []) map.set(i.id, { item: i, section: s });
+    return map;
+  };
+  const oldSections = new Map((before.sections || []).map((s) => [s.id, s]));
+  const newSections = new Map((after.sections || []).map((s) => [s.id, s]));
+  for (const s of after.sections || []) {
+    const old = oldSections.get(s.id);
+    if (!old) add('add', `Added area “${s.name}”`);
+    else if (old.name !== s.name) add('change', `Renamed area “${old.name}” to “${s.name}”`);
+    else if ((old.description || '') !== (s.description || '')) add('change', `Changed the description of “${s.name}”`);
+  }
+  for (const s of before.sections || []) if (!newSections.has(s.id)) add('remove', `Removed area “${s.name}” (${(s.items || []).length} line${(s.items || []).length === 1 ? '' : 's'})`);
+
+  const oldItems = index(before);
+  const newItems = index(after);
+  for (const [id, { item, section }] of newItems) {
+    const was = oldItems.get(id);
+    const where = newSections.size > 1 ? ` in ${section.name}` : '';
+    if (!was) {
+      add('add', item.kind === 'labour' ? `Added ${hours(item.hours)} of ${itemLabel(item)}${where}` : `Added ${item.qty} × ${item.name}${where}`);
+      continue;
+    }
+    const a = was.item;
+    const label = itemLabel(item);
+    if (item.kind === 'labour') {
+      if (Number(a.hours) !== Number(item.hours)) add('change', `${label}: ${hours(a.hours)} → ${hours(item.hours)}`);
+      if (a.type !== item.type) add('change', `Changed labour type to ${C.labourName(after, item.type)}`);
+    } else {
+      if (Number(a.qty) !== Number(item.qty)) add('change', `${label}: quantity ${a.qty} → ${item.qty}`);
+      const u1 = C.unitPrice(a, before);
+      const u2 = C.unitPrice(item, after);
+      if (u1 !== u2) add('change', `${label}: price ${money(u1)} → ${money(u2)} each`);
+      if (Number(a.discount || 0) !== Number(item.discount || 0)) add('change', `${label}: discount ${Number(a.discount || 0)}% → ${Number(item.discount || 0)}%`);
+      const h1 = C.itemTotals(a, before).labourHours;
+      const h2 = C.itemTotals(item, after).labourHours;
+      if (h1 !== h2) add('change', `${label}: labour ${hours(h1)} → ${hours(h2)}`);
+      if (a.name !== item.name) add('change', `Renamed “${a.name}” to “${item.name}”`);
+    }
+    if (was.section.id !== section.id && newSections.has(was.section.id)) add('change', `Moved ${label} to ${section.name}`);
+  }
+  for (const [id, { item, section }] of oldItems) {
+    if (newItems.has(id) || !newSections.has(section.id)) continue;
+    add('remove', item.kind === 'labour' ? `Removed ${hours(item.hours)} of ${itemLabel(item)}` : `Removed ${item.qty} × ${item.name}`);
+  }
+
+  if (Number(before.markup || 0) !== Number(after.markup || 0)) add('change', `Markup ${before.markup || 0}% → ${after.markup || 0}%`);
+  const d1 = C.quoteTotals(before);
+  const d2 = C.quoteTotals(after);
+  if (d1.discount !== d2.discount) add('change', `Quote discount ${money(d1.discount)} → ${money(d2.discount)}`);
+  if (Number(before.vatRate) !== Number(after.vatRate)) add('change', `VAT ${before.vatRate}% → ${after.vatRate}%`);
+  for (const t of after.labourTypes || []) {
+    const old = (before.labourTypes || []).find((x) => x.id === t.id);
+    if (old && Number(old.rate) !== Number(t.rate)) add('change', `${t.name} rate ${money(old.rate)} → ${money(t.rate)} per hour`);
+  }
+  const text = (q) => JSON.stringify([q.intro, q.scope?.map((s) => [s.heading, s.body]), q.terms]);
+  if (text(before) !== text(after)) add('change', 'Changed the proposal text or terms');
+  if (JSON.stringify(before.client || {}) !== JSON.stringify(after.client || {}) || (before.siteAddress || '') !== (after.siteAddress || '')) add('change', 'Changed the client details');
+  if (before.title !== after.title) add('change', `Title “${before.title}” → “${after.title}”`);
+  if (before.date !== after.date || Number(before.validDays) !== Number(after.validDays)) add('change', 'Changed the date or how long it is valid for');
+  return { changes: out, totalBefore: d1.total, totalAfter: d2.total };
+}
 
 // ---- Shared state ------------------------------------------------------------
 
@@ -143,8 +226,29 @@ const state = reactive({
   settings: null,
   me: storageGet('mesh.me', ''),
   catalogue: { loaded: false, loading: false, syncing: false, products: [], sources: [] },
+  kits: { loaded: false, list: [] },
   toasts: [],
 });
+
+async function loadKits(force = false) {
+  if (state.kits.loaded && !force) return;
+  try {
+    state.kits.list = await api('GET', '/api/kits');
+    state.kits.loaded = true;
+  } catch (err) {
+    toast(`Could not load kits: ${err.message}`, 'error');
+  }
+}
+
+// Current store price for each Ubiquiti SKU.
+function storePriceIndex() {
+  const index = {};
+  for (const p of state.catalogue.products) {
+    if (p.source === 'custom') continue;
+    for (const v of p.variants) index[v.sku] = v;
+  }
+  return index;
+}
 
 function parseRoute() {
   const parts = (location.hash.replace(/^#\/?/, '') || '').split('/').filter(Boolean);
@@ -334,7 +438,7 @@ const STATUS_BADGE = { SoldOut: 'Sold out', ComingSoon: 'Coming soon', RegionNot
 
 const ProductPicker = {
   components: { Modal, MoneyInput },
-  props: { sectionName: String },
+  props: { sectionName: String, quote: Object },
   emits: ['add', 'close'],
   data() {
     return {
@@ -368,6 +472,11 @@ const ProductPicker = {
     ubiquitiSource() {
       return this.cat.sources.find((s) => s.id === 'ubiquiti') || {};
     },
+    kits() {
+      const q = this.q.trim().toLowerCase();
+      return state.kits.list.filter((k) => !q || [k.name, k.description, ...k.items.map((i) => i.name)].join(' ').toLowerCase().includes(q));
+    },
+    kitsLoaded: () => state.kits.loaded,
   },
   watch: {
     q() {
@@ -384,10 +493,40 @@ const ProductPicker = {
   },
   mounted() {
     loadCatalogue();
+    loadKits();
     nextTick(() => this.$refs.search?.focus());
   },
   methods: {
     ...sharedMethods,
+    // A kit's items priced with this quote's rates and today's store prices.
+    kitItems(kit) {
+      const prices = storePriceIndex();
+      return freshItems(kit.items).map((item) => {
+        const now = item.source === 'ubiquiti' && prices[item.sku];
+        if (now) {
+          item.basePrice = now.price;
+          item.surcharge = now.surcharge || 0;
+        }
+        return item;
+      });
+    },
+    kitTotal(kit) {
+      return this.kitItems(kit).reduce((s, i) => s + C.itemTotals(i, this.quote).total, 0);
+    },
+    kitSummary(kit) {
+      const products = kit.items.filter((i) => i.kind !== 'labour');
+      const labour = kit.items.reduce((h, i) => h + C.itemTotals(i, this.quote).labourHours, 0);
+      const names = products.slice(0, 4).map((i) => `${i.qty} × ${i.name}`);
+      if (products.length > 4) names.push(`${products.length - 4} more`);
+      if (labour) names.push(`${hours(labour)} labour`);
+      return names.join(' · ');
+    },
+    addKit(kit) {
+      const items = this.kitItems(kit);
+      for (const item of items) this.$emit('add', item);
+      this.added += items.length;
+      toast(`Added kit “${kit.name}” (${items.length} line${items.length === 1 ? '' : 's'})`);
+    },
     blankManual() {
       return { manufacturer: '', name: '', model: '', description: '', price: null, cost: null, image: '', qty: 1, save: true };
     },
@@ -434,6 +573,7 @@ const ProductPicker = {
         surcharge: 0,
         costPrice: m.cost,
         priceOverride: null,
+        discount: 0,
         qty: Math.max(1, Number(m.qty) || 1),
         labour: [],
       };
@@ -449,10 +589,31 @@ const ProductPicker = {
       <div class="tabs">
         <button :class="{ active: tab === 'ubiquiti' }" @click="tab = 'ubiquiti'">Ubiquiti</button>
         <button :class="{ active: tab === 'custom' }" @click="tab = 'custom'">Our products</button>
+        <button :class="{ active: tab === 'kits' }" @click="tab = 'kits'">Kits <span class="count" v-if="kitsLoaded">{{ kits.length }}</span></button>
         <button :class="{ active: tab === 'manual' }" @click="tab = 'manual'">One-off item</button>
       </div>
 
-      <template v-if="tab !== 'manual'">
+      <template v-if="tab === 'kits'">
+        <input ref="search" class="search" type="search" v-model="q" placeholder="Search kits">
+        <p class="picker-meta">A kit adds a saved group of items and their labour in one go. To make one, build an area, then click <b>Save as kit</b> under it.</p>
+        <div v-if="!kitsLoaded" class="empty">Loading kits…</div>
+        <div v-else-if="!kits.length" class="empty">{{ q ? 'No kits match “' + q + '”.' : 'No kits yet.' }}</div>
+        <ul class="results" v-else>
+          <li v-for="k in kits" :key="k.id" class="result kit-result">
+            <div class="thumb kit-thumb"><span></span><span></span><span></span></div>
+            <div class="r-main">
+              <div class="r-name">{{ k.name }}</div>
+              <div class="r-sub">{{ k.items.length }} line{{ k.items.length === 1 ? '' : 's' }}</div>
+              <div class="r-desc" v-if="k.description">{{ k.description }}</div>
+              <div class="r-desc muted">{{ kitSummary(k) }}</div>
+            </div>
+            <div class="r-price"><div class="price">{{ money(kitTotal(k)) }}</div><div class="surcharge">ex VAT, today's prices</div></div>
+            <div class="r-add"><button class="btn primary" @click="addKit(k)">Add kit</button></div>
+          </li>
+        </ul>
+      </template>
+
+      <template v-else-if="tab !== 'manual'">
         <div class="picker-filters">
           <input ref="search" class="search" type="search" v-model="q" :placeholder="tab === 'ubiquiti' ? 'Search Ubiquiti products, e.g. U7 Pro, USW-24-PoE, doorbell' : 'Search our products'">
           <select v-model="category">
@@ -540,12 +701,16 @@ const QuotesList = {
       );
     },
     counts() {
-      const c = { all: this.quotes.length, draft: 0, sent: 0, accepted: 0, declined: 0 };
+      const c = { all: this.quotes.length, draft: 0, sent: 0, changes: 0, accepted: 0, declined: 0 };
       for (const q of this.quotes) c[q.status] = (c[q.status] || 0) + 1;
       return c;
     },
+    chipKeys() {
+      // Only show "Changes requested" when there are some.
+      return ['all', ...STATUS_KEYS.filter((k) => k !== 'changes' || this.counts.changes)];
+    },
     pipeline() {
-      return this.quotes.filter((q) => q.status === 'sent').reduce((s, q) => s + q.subtotal, 0);
+      return this.quotes.filter((q) => q.status === 'sent' || q.status === 'changes').reduce((s, q) => s + q.subtotal, 0);
     },
     won() {
       return this.quotes.filter((q) => q.status === 'accepted').reduce((s, q) => s + q.subtotal, 0);
@@ -563,6 +728,13 @@ const QuotesList = {
   methods: {
     ...sharedMethods,
     statusLabel: (s) => STATUS_LABELS[s] || s,
+    // e.g. "Opened 3 times · 2 hr ago", or the client's reply.
+    activityLine(q) {
+      if (q.response && REPLY_STATUS[q.response.action] === q.status) return `${q.response.name} replied online · ${timeAgo(q.response.at)}`;
+      if (q.views) return `Opened ${q.views === 1 ? 'once' : q.views + ' times'} · ${timeAgo(q.lastViewed)}`;
+      if (q.status === 'sent') return 'Not opened yet';
+      return '';
+    },
     open(q) {
       location.hash = `#/quote/${q.id}`;
     },
@@ -615,7 +787,7 @@ const QuotesList = {
 
     <div class="toolbar-row" v-if="quotes.length">
       <div class="chips">
-        <button v-for="s in ['all','draft','sent','accepted','declined']" :key="s" class="chip" :class="{ active: status === s }" @click="status = s">
+        <button v-for="s in chipKeys" :key="s" class="chip" :class="{ active: status === s }" @click="status = s">
           {{ s === 'all' ? 'All' : statusLabel(s) }} <span>{{ counts[s] || 0 }}</span>
         </button>
       </div>
@@ -637,7 +809,7 @@ const QuotesList = {
             <td class="ref">{{ q.number }}</td>
             <td><div class="strong">{{ q.title }}</div><div class="muted sm">{{ q.client || 'No client yet' }} · {{ q.items }} line{{ q.items === 1 ? '' : 's' }}</div></td>
             <td>{{ q.preparedBy || '—' }}</td>
-            <td><span class="pill" :class="q.status">{{ statusLabel(q.status) }}</span></td>
+            <td><span class="pill" :class="q.status">{{ statusLabel(q.status) }}</span><div class="activity-line" :class="{ fresh: q.response && q.status !== 'sent' }" v-if="activityLine(q)">{{ activityLine(q) }}</div></td>
             <td class="num strong">{{ money(q.subtotal) }}</td>
             <td class="muted">{{ timeAgo(q.updatedAt) }}</td>
             <td class="actions" @click.stop>
@@ -670,14 +842,59 @@ const QuoteEditor = {
       pickerSection: null,
       labourOpen: {},
       descOpen: {},
+      discOpen: {},
+      costOpen: {},
+      activity: null,
+      revisions: null,
+      compareN: null,
+      versionNote: '',
+      savingVersion: false,
+      kitDraft: null,
+      hideProfit: storageGet('mesh.hideProfit') === '1',
     };
   },
   computed: {
+    STATUS_LABELS: () => STATUS_LABELS,
+    REPLY_LABELS: () => REPLY_LABELS,
+    VERSION_KINDS: () => VERSION_KINDS,
     settings() {
       return state.settings;
     },
     totals() {
       return this.quote ? C.quoteTotals(this.quote) : null;
+    },
+    // The client's reply, while the quote still shows the result of it.
+    reply() {
+      const r = this.quote?.clientResponse;
+      return r && REPLY_STATUS[r.action] === this.quote.status ? r : null;
+    },
+    marginClass() {
+      const m = this.totals?.margin || 0;
+      return m < 0 ? 'loss' : m < 10 ? 'thin' : 'ok';
+    },
+    versions() {
+      return this.revisions ? [...this.revisions].reverse() : [];
+    },
+    session: () => state.session,
+    conflictByClient() {
+      return Boolean(this.conflict?.clientResponse?.id && this.conflict.clientResponse.id !== this.quote?.clientResponse?.id);
+    },
+    // Client views and replies, newest first.
+    timeline() {
+      if (!this.activity) return [];
+      const replies = this.activity.responses.map((r) => ({
+        kind: r.action,
+        at: r.at,
+        title: `${REPLY_LABELS[r.action]} by ${r.name}`,
+        detail: [r.po ? `PO ${r.po}` : '', r.email, r.message ? `“${r.message}”` : ''].filter(Boolean).join(' · '),
+      }));
+      const views = this.activity.views.recent.map((v) => ({ kind: 'view', at: v.at, title: `Opened on a ${v.device}`, detail: '' }));
+      return [...replies, ...views].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 25);
+    },
+    comparison() {
+      if (!this.compareN || !this.revisions) return null;
+      const rev = this.revisions.find((r) => r.n === this.compareN);
+      return rev ? { rev, ...diffQuotes(rev.quote, this.quote) } : null;
     },
     team() {
       return (this.settings?.team || []).map((m) => m.name).filter(Boolean);
@@ -687,12 +904,7 @@ const QuoteEditor = {
     },
     // Current store prices by SKU, to spot lines whose price has changed.
     priceIndex() {
-      const index = {};
-      for (const p of state.catalogue.products) {
-        if (p.source === 'custom') continue;
-        for (const v of p.variants) index[v.sku] = v;
-      }
-      return index;
+      return storePriceIndex();
     },
     changedPrices() {
       if (!this.quote || !state.catalogue.loaded) return [];
@@ -729,12 +941,19 @@ const QuoteEditor = {
         this.scheduleSave();
       },
     },
+    tab(t) {
+      if (t === 'history') {
+        this.loadRevisions();
+        this.loadActivity();
+      }
+    },
   },
   async mounted() {
     loadCatalogue();
     try {
       const quote = await api('GET', `/api/quotes/${this.id}`);
       this.setQuote(quote);
+      this.loadActivity();
     } catch (err) {
       this.loadError = err.message;
     }
@@ -745,20 +964,28 @@ const QuoteEditor = {
       }
     };
     window.addEventListener('beforeunload', this.onUnload);
+    // Coming back to the tab: check whether the client has opened or replied.
+    this.onVisible = () => document.visibilityState === 'visible' && this.quote && this.loadActivity();
+    document.addEventListener('visibilitychange', this.onVisible);
   },
   beforeUnmount() {
     window.removeEventListener('beforeunload', this.onUnload);
+    document.removeEventListener('visibilitychange', this.onVisible);
     if (this.saveState === 'unsaved') this.saveNow();
   },
   methods: {
     ...sharedMethods,
     statusLabel: (s) => STATUS_LABELS[s] || s,
+    pct: (n) => `${Math.round((Number(n) || 0) * 10) / 10}%`,
     setQuote(quote) {
       // Older or hand-edited quotes may be missing fields.
       quote.sections ||= [];
       quote.scope ||= [];
       quote.display ||= {};
+      quote.display.layout ||= 'detailed';
       quote.client ||= {};
+      quote.discount ||= { type: 'none', percent: null, amount: null, label: '' };
+      quote.costDiscount ??= 0;
       for (const s of quote.sections) for (const i of s.items) if (i.kind !== 'labour') i.labour ||= [];
       this.skipWatch = true;
       this.quote = quote;
@@ -802,15 +1029,83 @@ const QuoteEditor = {
       toast('Loaded the latest version');
     },
     keepMine() {
+      // If the client replied in the meantime, keep the status their reply set.
+      if (this.conflict.clientResponse?.id && this.conflict.clientResponse.id !== this.quote.clientResponse?.id) {
+        this.quote.status = this.conflict.status;
+        this.quote.clientResponse = this.conflict.clientResponse;
+      }
       this.baseUpdatedAt = this.conflict.updatedAt;
       this.conflict = null;
       this.saveState = 'unsaved';
       this.saveNow();
     },
+    async loadActivity() {
+      try {
+        const activity = await api('GET', `/api/quotes/${this.quote.id}/activity`);
+        const latest = activity.responses[0];
+        const isNew = this.activity && latest && latest.id !== this.activity.responses[0]?.id;
+        this.activity = activity;
+        // The client replied while this was open: show their reply now.
+        if (latest && latest.id !== this.quote.clientResponse?.id && this.saveState === 'saved' && !this.saving) {
+          this.setQuote(await api('GET', `/api/quotes/${this.quote.id}`));
+          if (isNew) toast(`${REPLY_LABELS[latest.action]} by ${latest.name}`);
+          if (this.revisions) this.loadRevisions();
+        }
+      } catch {
+        /* not important enough to interrupt */
+      }
+    },
+    async loadRevisions() {
+      try {
+        this.revisions = await api('GET', `/api/quotes/${this.quote.id}/revisions`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
+    async saveVersion() {
+      this.savingVersion = true;
+      try {
+        await this.saveNow();
+        const result = await api('POST', `/api/quotes/${this.quote.id}/revisions`, { note: this.versionNote, by: state.me });
+        toast(result.skipped ? `Nothing has changed since version ${result.revision.n}` : `Saved as version ${result.revision.n}`);
+        this.versionNote = '';
+        await this.loadRevisions();
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        this.savingVersion = false;
+      }
+    },
+    async restoreVersion(rev) {
+      if (!confirm(`Go back to version ${rev.n}? What you have now is saved as a version first, so you can undo this.`)) return;
+      try {
+        await this.saveNow();
+        const restored = await api('POST', `/api/quotes/${this.quote.id}/revisions/${rev.n}/restore`, { by: state.me });
+        this.setQuote(restored);
+        this.compareN = null;
+        await this.loadRevisions();
+        toast(`Back to version ${rev.n}`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
+    toggleProfit() {
+      this.hideProfit = !this.hideProfit;
+      storageSet('mesh.hideProfit', this.hideProfit ? '1' : '0');
+    },
     async copyClientLink() {
+      // Sharing the link is sending it, so mark the quote as Sent.
+      const marked = ['draft', 'changes'].includes(this.quote.status);
+      if (marked) {
+        this.quote.status = 'sent';
+        await nextTick();
+      }
       await this.saveNow();
+      api('POST', `/api/quotes/${this.quote.id}/revisions`, { kind: 'sent', note: 'Client link copied', by: state.me })
+        .then(() => this.revisions && this.loadRevisions())
+        .catch(() => {});
       if (await copyText(`${location.origin}/p/${this.quote.id}`)) {
-        toast('Client link copied. Anyone with this link can view (not edit) the proposal.');
+        toast(marked ? 'Client link copied, and the quote is now marked as Sent.' : 'Client link copied. Anyone with this link can view (not edit) the proposal.');
       }
     },
     async openProposal(pdf) {
@@ -851,6 +1146,24 @@ const QuoteEditor = {
         inputs[inputs.length - 1]?.select();
       });
     },
+    openKitDraft(section) {
+      this.kitDraft = { items: section.items, name: section.name, description: section.description || '', saving: false };
+    },
+    async saveKit() {
+      const d = this.kitDraft;
+      if (!d.name.trim()) return toast('Give the kit a name', 'error');
+      d.saving = true;
+      try {
+        const items = clone(d.items).map(({ id, ...item }) => ({ ...item, labour: (item.labour || []).map(({ id: _id, ...l }) => l) }));
+        await api('POST', '/api/kits', { name: d.name, description: d.description, items });
+        await loadKits(true);
+        this.kitDraft = null;
+        toast(`Saved kit “${d.name}”. Find it under Add product, then Kits.`);
+      } catch (err) {
+        d.saving = false;
+        toast(err.message, 'error');
+      }
+    },
     removeSection(section) {
       if (section.items.length && !confirm(`Remove “${section.name}” and its ${section.items.length} line(s)?`)) return;
       this.quote.sections.splice(this.quote.sections.indexOf(section), 1);
@@ -889,6 +1202,14 @@ const QuoteEditor = {
     },
     defaultUnit(item) {
       return C.unitPrice({ ...item, priceOverride: null }, this.quote);
+    },
+    defaultCost(item) {
+      return C.unitCost({ ...item, costPrice: null }, this.quote);
+    },
+    lineMargin(item) {
+      const t = this.itemTotals(item);
+      if (!t.equipment) return null;
+      return ((t.equipment - C.unitCost(item, this.quote) * Number(item.qty || 0)) / t.equipment) * 100;
     },
     labourCost(item, entry) {
       return Math.round(Number(entry.hours || 0) * Number(item.qty || 0) * C.labourRate(this.quote, entry.type));
@@ -931,6 +1252,7 @@ const QuoteEditor = {
         if (existing) {
           existing.name = t.name;
           existing.rate = t.rate;
+          existing.cost = t.cost ?? null;
         } else this.quote.labourTypes.push(clone(t));
       }
       toast('Labour rates set to the defaults from Settings');
@@ -948,7 +1270,7 @@ const QuoteEditor = {
         <span class="ref">{{ quote.number }}</span>
         <input class="title-input" v-model="quote.title" placeholder="Proposal title" aria-label="Proposal title">
         <select class="status-select" :class="quote.status" v-model="quote.status" aria-label="Status">
-          <option v-for="(label, key) in { draft: 'Draft', sent: 'Sent', accepted: 'Accepted', declined: 'Declined' }" :value="key">{{ label }}</option>
+          <option v-for="(label, key) in STATUS_LABELS" :value="key">{{ label }}</option>
         </select>
       </div>
       <div class="head-actions">
@@ -961,11 +1283,26 @@ const QuoteEditor = {
       </div>
     </div>
 
+    <div class="reply-card" :class="reply.action" v-if="reply">
+      <span class="rc-mark"></span>
+      <div class="rc-body">
+        <div class="rc-title"><b>{{ REPLY_LABELS[reply.action] }}</b> by {{ reply.name }} · {{ formatDateTime(reply.at) }}</div>
+        <div class="rc-meta" v-if="reply.po || reply.email">
+          <span v-if="reply.po">PO {{ reply.po }}</span>
+          <a v-if="reply.email" :href="'mailto:' + reply.email">{{ reply.email }}</a>
+        </div>
+        <div class="rc-message" v-if="reply.message">“{{ reply.message }}”</div>
+        <div class="rc-meta" v-if="reply.action === 'accept' && reply.total !== totals.total">The total has changed since they accepted: {{ money(reply.total) }} then, {{ money(totals.total) }} now.</div>
+        <div class="rc-meta" v-if="reply.action === 'changes'">Make the changes, then copy the client link again to send them the update.</div>
+      </div>
+    </div>
+
     <nav class="tabs editor-tabs">
       <button :class="{ active: tab === 'items' }" @click="tab = 'items'">Equipment &amp; labour</button>
       <button :class="{ active: tab === 'details' }" @click="tab = 'details'">Client &amp; details</button>
       <button :class="{ active: tab === 'text' }" @click="tab = 'text'">Proposal text</button>
       <button :class="{ active: tab === 'pricing' }" @click="tab = 'pricing'">Pricing &amp; terms</button>
+      <button :class="{ active: tab === 'history' }" @click="tab = 'history'">History<span class="count" v-if="activity && activity.views.count">{{ activity.views.count }} view{{ activity.views.count === 1 ? '' : 's' }}</span></button>
     </nav>
 
     <div class="editor-body">
@@ -1027,8 +1364,20 @@ const QuoteEditor = {
                       <span>{{ item.sku || item.model }}</span>
                       <a v-if="item.url" :href="item.url" target="_blank" rel="noopener">store page ↗</a>
                       <button class="link sm" @click="descOpen[item.id] = !descOpen[item.id]">{{ descOpen[item.id] ? 'Hide description' : 'Description' }}</button>
+                      <button class="link sm" v-if="!item.discount" @click="discOpen[item.id] = !discOpen[item.id]">Discount</button>
+                      <button class="link sm" @click="costOpen[item.id] = !costOpen[item.id]">{{ costOpen[item.id] ? 'Hide cost' : 'Our cost' }}</button>
                     </div>
                     <AutoTextarea v-if="descOpen[item.id]" class="l-desc" v-model="item.description" :rows="2" placeholder="Description shown to the client" />
+                    <div class="l-extras" v-if="discOpen[item.id] || item.discount">
+                      <label class="mini-field">Discount <input type="number" min="0" max="100" step="0.5" v-model.number="item.discount" aria-label="Discount percent"> %</label>
+                      <span class="muted sm" v-if="itemTotals(item).discount">saves the client {{ money(itemTotals(item).discount) }}</span>
+                      <button class="link sm" @click="item.discount = 0; discOpen[item.id] = false">{{ item.discount ? 'Remove' : 'Cancel' }}</button>
+                    </div>
+                    <div class="l-extras internal" v-if="costOpen[item.id]">
+                      <label class="mini-field">Our cost each <MoneyInput small v-model="item.costPrice" :placeholder="defaultCost(item)" /></label>
+                      <span class="sm" :class="lineMargin(item) < 0 ? 'error-text' : 'muted'" v-if="lineMargin(item) !== null">{{ pct(lineMargin(item)) }} margin</span>
+                      <span class="muted sm" v-if="item.costPrice == null && item.source === 'ubiquiti'">(store price{{ quote.costDiscount ? ' less ' + quote.costDiscount + '%' : '' }})</span>
+                    </div>
                     <div class="price-change" v-if="storePriceChange(item)">
                       Store price now {{ money(storePriceChange(item).price) }}<template v-if="storePriceChange(item).surcharge"> + {{ money(storePriceChange(item).surcharge) }} surcharge</template>
                       <button class="link sm" @click="applyStorePrice(item)">Update</button>
@@ -1041,7 +1390,7 @@ const QuoteEditor = {
                     <div class="price-note" v-else-if="item.source === 'ubiquiti' && item.surcharge && quote.includeSurcharges !== false">incl. {{ money(item.surcharge) }} surcharge</div>
                     <div class="price-note" v-else-if="item.source === 'ubiquiti' && quote.markup">store {{ money(item.basePrice + (quote.includeSurcharges !== false ? item.surcharge || 0 : 0)) }} + {{ quote.markup }}%</div>
                   </div>
-                  <div class="l-total r strong">{{ money(itemTotals(item).equipment) }}</div>
+                  <div class="l-total r strong"><s class="was" v-if="itemTotals(item).discount">{{ money(itemTotals(item).gross) }}</s>{{ money(itemTotals(item).equipment) }}</div>
                   <div class="l-actions">
                     <button class="icon-btn" title="Move up" @click="move(section.items, ii, -1)" :disabled="ii === 0">↑</button>
                     <button class="icon-btn" title="Move down" @click="move(section.items, ii, 1)" :disabled="ii === section.items.length - 1">↓</button>
@@ -1075,6 +1424,7 @@ const QuoteEditor = {
             <footer class="area-foot">
               <button class="btn primary" @click="pickerSection = section.id">+ Add product</button>
               <button class="btn" @click="addLabourLine(section)">+ Add labour line</button>
+              <button class="btn ghost" v-if="section.items.length" @click="openKitDraft(section)" title="Save these lines to reuse on other quotes">Save as kit</button>
               <div class="area-foot-sum">
                 <span>Equipment <b>{{ money(totals.sections[si].equipment) }}</b></span>
                 <span>Labour <b>{{ money(totals.sections[si].labour) }}</b> <small>({{ hours(totals.sections[si].hours) }})</small></span>
@@ -1099,7 +1449,7 @@ const QuoteEditor = {
               </label>
               <label>Status
                 <select v-model="quote.status">
-                  <option v-for="(label, key) in { draft: 'Draft', sent: 'Sent', accepted: 'Accepted', declined: 'Declined' }" :value="key">{{ label }}</option>
+                  <option v-for="(label, key) in STATUS_LABELS" :value="key">{{ label }}</option>
                 </select>
               </label>
             </div>
@@ -1147,11 +1497,12 @@ const QuoteEditor = {
               <button class="link" @click="useDefaultRates">Use default rates from Settings</button>
             </div>
             <table class="rates">
-              <thead><tr><th>Labour type</th><th>Rate per hour (ex VAT)</th><th class="num">Hours on quote</th><th class="num">Total</th></tr></thead>
+              <thead><tr><th>Labour type</th><th>Rate per hour (ex VAT)</th><th>Our cost per hour <small>(internal)</small></th><th class="num">Hours on quote</th><th class="num">Total</th></tr></thead>
               <tbody>
                 <tr v-for="t in quote.labourTypes" :key="t.id">
                   <td><input v-model="t.name" aria-label="Labour type name"></td>
                   <td><MoneyInput v-model="t.rate" small /></td>
+                  <td><MoneyInput v-model="t.cost" small placeholder="" /></td>
                   <td class="num">{{ hours((totals.labourByType.find(x => x.id === t.id) || {}).hours || 0) }}</td>
                   <td class="num strong">{{ money((totals.labourByType.find(x => x.id === t.id) || {}).cost || 0) }}</td>
                 </tr>
@@ -1160,11 +1511,35 @@ const QuoteEditor = {
           </section>
 
           <section class="card">
+            <h2 class="card-title">Discount on the whole quote</h2>
+            <div class="form-grid">
+              <label>Discount
+                <select v-model="quote.discount.type">
+                  <option value="none">No discount</option>
+                  <option value="percent">Percentage off</option>
+                  <option value="amount">Fixed amount off</option>
+                </select>
+              </label>
+              <label v-if="quote.discount.type === 'percent'">Percentage off (%)<input type="number" min="0" max="100" step="0.5" v-model.number="quote.discount.percent"></label>
+              <label v-if="quote.discount.type === 'amount'">Amount off (ex VAT)<MoneyInput v-model="quote.discount.amount" /></label>
+              <label class="span-2" v-if="quote.discount.type !== 'none'">Name shown to the client
+                <input v-model="quote.discount.label" placeholder="e.g. Loyalty discount, Package saving">
+                <small class="muted">The investment summary will show “{{ totals.discountLabel }}: −{{ money(totals.discount) }}”.</small>
+              </label>
+            </div>
+            <p class="muted sm" v-if="quote.discount.type === 'none'">To discount one item instead, click <b>Discount</b> under it on the Equipment &amp; labour tab.</p>
+          </section>
+
+          <section class="card">
             <h2 class="card-title">Equipment pricing</h2>
             <div class="form-grid">
               <label>Markup on Ubiquiti store prices (%)
                 <input type="number" step="0.5" v-model.number="quote.markup">
                 <small class="muted">Applied to catalogue items without a price you've typed in. Use a negative number for a discount.</small>
+              </label>
+              <label>Our trade discount off Ubiquiti store prices (%)
+                <input type="number" step="0.5" min="0" max="100" v-model.number="quote.costDiscount">
+                <small class="muted">Internal only, for the profit figure. If you buy 15% below the store price, enter 15.</small>
               </label>
               <label>VAT rate (%)<input type="number" step="0.5" min="0" v-model.number="quote.vatRate"></label>
               <label class="check span-2"><input type="checkbox" v-model="quote.includeSurcharges">
@@ -1176,7 +1551,17 @@ const QuoteEditor = {
 
           <section class="card">
             <h2 class="card-title">What the proposal shows</h2>
-            <div class="checks">
+            <div class="layout-choice">
+              <label class="choice" :class="{ active: quote.display.layout !== 'summary' }">
+                <input type="radio" value="detailed" v-model="quote.display.layout">
+                <span><b>Every item</b><small>Each product with its quantity and price</small></span>
+              </label>
+              <label class="choice" :class="{ active: quote.display.layout === 'summary' }">
+                <input type="radio" value="summary" v-model="quote.display.layout">
+                <span><b>Area totals only</b><small>What's in each area, with one price per area</small></span>
+              </label>
+            </div>
+            <div class="checks" :class="{ dim: quote.display.layout === 'summary' }">
               <label class="check"><input type="checkbox" v-model="quote.display.showImages"> Product images</label>
               <label class="check"><input type="checkbox" v-model="quote.display.showItemPrices"> Price of each item</label>
               <label class="check"><input type="checkbox" v-model="quote.display.showSku"> Manufacturer and model numbers</label>
@@ -1194,6 +1579,66 @@ const QuoteEditor = {
             <AutoTextarea v-model="quote.notes" :rows="3" placeholder="Notes for the team" />
           </section>
         </template>
+
+        <!-- History -->
+        <template v-if="tab === 'history'">
+          <section class="card">
+            <h2 class="card-title">Client activity</h2>
+            <div v-if="!activity" class="empty">Loading…</div>
+            <template v-else>
+              <div class="activity-stats">
+                <div><span>Times opened</span><b>{{ activity.views.count }}</b></div>
+                <div><span>First opened</span><b>{{ activity.views.first ? formatDateTime(activity.views.first) : '—' }}</b></div>
+                <div><span>Last opened</span><b>{{ activity.views.last ? timeAgo(activity.views.last) : '—' }}</b></div>
+              </div>
+              <ul class="timeline" v-if="timeline.length">
+                <li v-for="(e, i) in timeline" :key="i" :class="e.kind">
+                  <span class="t-dot"></span>
+                  <div><div class="t-title">{{ e.title }}</div><div class="muted sm" v-if="e.detail">{{ e.detail }}</div></div>
+                  <span class="muted sm t-time">{{ formatDateTime(e.at) }}</span>
+                </li>
+              </ul>
+              <p class="muted sm" v-else-if="session && session.authEnabled">Nobody has opened the client link yet. When they do, you'll see it here. Your own team's views don't count.</p>
+              <p class="muted sm" v-else>Views are counted on the online version, where the team signs in with a password, so your own views aren't mistaken for the client's.</p>
+            </template>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">Versions</h2>
+            <p class="muted sm">A version is saved each time you copy the client link (if anything changed) and whenever the client replies. You can save one yourself too.</p>
+            <div class="version-save">
+              <input v-model="versionNote" maxlength="200" placeholder="Note (optional), e.g. Before adding the garden" @keydown.enter="saveVersion">
+              <button class="btn" @click="saveVersion" :disabled="savingVersion">{{ savingVersion ? 'Saving…' : 'Save version' }}</button>
+            </div>
+            <div v-if="!revisions" class="empty">Loading…</div>
+            <div v-else-if="!versions.length" class="empty">No versions saved yet.</div>
+            <ul class="versions" v-else>
+              <li v-for="v in versions" :key="v.n" :class="[v.kind, { open: compareN === v.n }]">
+                <div class="v-row">
+                  <div class="v-main">
+                    <div class="v-title"><b>Version {{ v.n }}</b><span class="v-kind">{{ VERSION_KINDS[v.kind] || 'Saved' }}</span></div>
+                    <div class="muted sm">{{ formatDateTime(v.at) }}<template v-if="v.by"> · {{ v.by }}</template><template v-if="v.note && (v.kind === 'manual' || v.kind === 'restore')"> · {{ v.note }}</template></div>
+                  </div>
+                  <div class="v-total">{{ money(v.total) }}<small>inc VAT</small></div>
+                  <div class="v-actions">
+                    <button class="btn sm" @click="compareN = compareN === v.n ? null : v.n">{{ compareN === v.n ? 'Hide' : 'What changed since' }}</button>
+                    <button class="btn ghost sm" @click="restoreVersion(v)">Go back to this</button>
+                  </div>
+                </div>
+                <div class="v-diff" v-if="comparison && compareN === v.n">
+                  <p v-if="!comparison.changes.length" class="muted sm">Nothing has changed since this version.</p>
+                  <ul v-else>
+                    <li v-for="(c, i) in comparison.changes" :key="i" :class="c.type">{{ c.text }}</li>
+                  </ul>
+                  <div class="v-diff-total" v-if="comparison.totalBefore !== comparison.totalAfter">
+                    Total {{ money(comparison.totalBefore) }} → {{ money(comparison.totalAfter) }} inc VAT
+                    <b :class="comparison.totalAfter > comparison.totalBefore ? 'up' : 'down'">({{ comparison.totalAfter > comparison.totalBefore ? '+' : '−' }}{{ money(Math.abs(comparison.totalAfter - comparison.totalBefore)) }})</b>
+                  </div>
+                </div>
+              </li>
+            </ul>
+          </section>
+        </template>
       </div>
 
       <aside class="editor-side">
@@ -1204,32 +1649,57 @@ const QuoteEditor = {
           <div class="sum-sub" v-for="l in totals.labourByType.filter(x => x.hours > 0)" :key="l.id">
             <span>{{ l.name }} · {{ hours(l.hours) }}</span><span>{{ money(l.cost) }}</span>
           </div>
+          <div class="sum-row disc" v-if="totals.discount"><span>{{ totals.discountLabel }}</span><b>−{{ money(totals.discount) }}</b></div>
           <div class="sum-row sep"><span>Subtotal</span><b>{{ money(totals.subtotal) }}</b></div>
           <div class="sum-row"><span>VAT {{ totals.vatRate }}%</span><b>{{ money(totals.vat) }}</b></div>
           <div class="sum-total"><span>Total inc VAT</span><strong>{{ money(totals.total) }}</strong></div>
-          <div class="sum-internal" v-if="totals.equipment !== totals.equipmentCost && totals.equipmentCost">
-            Internal: equipment at store prices / our costs is {{ money(totals.equipmentCost) }}, so equipment margin is {{ money(totals.equipment - totals.equipmentCost) }}
-          </div>
+          <div class="sum-savings" v-if="totals.savings">Client saves {{ money(totals.savings) }} + VAT</div>
           <div class="side-actions">
             <button class="btn" @click="openProposal(false)">Preview</button>
             <button class="btn primary" @click="openProposal(true)">PDF</button>
             <button class="btn ghost span-2" @click="copyClientLink">Copy client link</button>
           </div>
         </div>
+        <div class="card profit" v-if="!hideProfit">
+          <div class="profit-head"><h3>Profit <small>only you see this</small></h3><button class="link sm" @click="toggleProfit">Hide</button></div>
+          <div class="profit-big" :class="marginClass"><strong>{{ money(totals.profit) }}</strong><span>{{ pct(totals.margin) }} margin</span></div>
+          <div class="margin-bar" :class="marginClass"><span :style="{ width: Math.max(0, Math.min(100, totals.margin)) + '%' }"></span></div>
+          <div class="sum-sub"><span>On equipment</span><span>{{ money(totals.equipmentProfit) }}</span></div>
+          <div class="sum-sub"><span>On labour</span><span>{{ money(totals.labourProfit) }}</span></div>
+          <div class="sum-sub" v-if="totals.discount"><span>Quote discount</span><span>−{{ money(totals.discount) }}</span></div>
+          <div class="sum-sub"><span>Our costs</span><span>{{ money(totals.cost) }}</span></div>
+          <p class="profit-note" v-if="totals.missingLabourHours">{{ hours(totals.missingLabourHours) }} of labour has no cost per hour, so it counts as all profit. <a href="#" @click.prevent="tab = 'pricing'">Add labour costs</a></p>
+          <p class="profit-note" v-if="totals.missingCost">{{ totals.missingCost }} item{{ totals.missingCost === 1 ? ' has' : 's have' }} no cost price, so {{ totals.missingCost === 1 ? 'it counts' : 'they count' }} at the selling price.</p>
+        </div>
+        <button v-else class="link sm show-profit" @click="toggleProfit">Show profit</button>
         <div class="card side-meta">
           <div><span>Client</span>{{ quote.client.company || quote.client.name || '—' }}</div>
           <div><span>Prepared by</span>{{ quote.preparedBy || '—' }}</div>
           <div><span>Valid until</span>{{ validUntil }}</div>
+          <div v-if="activity"><span>Client views</span>{{ activity.views.count ? activity.views.count + ' · ' + timeAgo(activity.views.last) : quote.status === 'draft' ? '—' : 'Not opened yet' }}</div>
           <a class="link sm" href="#" @click.prevent="tab = 'details'">Edit details</a>
         </div>
       </aside>
     </div>
 
-    <ProductPicker v-if="pickerSection" :section-name="pickerSectionName" @add="addItem" @close="pickerSection = null" />
+    <ProductPicker v-if="pickerSection" :section-name="pickerSectionName" :quote="quote" @add="addItem" @close="pickerSection = null" />
 
-    <Modal v-if="conflict" title="This quote was changed by someone else" @close="useTheirs">
-      <p>While you were editing, another person saved changes to {{ quote.number }} ({{ formatDateTime(conflict.updatedAt) }}).</p>
-      <p class="muted">Load their version to see their changes (your unsaved edits will be lost), or keep yours and replace theirs.</p>
+    <Modal v-if="kitDraft" title="Save as kit" @close="kitDraft = null">
+      <p class="muted sm" style="margin-top: 0">Saves the {{ kitDraft.items.length }} line{{ kitDraft.items.length === 1 ? '' : 's' }} in this area, with their labour, so you can add them to any quote from <b>Add product → Kits</b>. Ubiquiti prices update to the store's when you add it.</p>
+      <form class="form-grid" id="kit-form" @submit.prevent="saveKit">
+        <label class="span-2">Kit name<input v-model="kitDraft.name" required maxlength="120" placeholder="e.g. Standard WiFi room"></label>
+        <label class="span-2">Description (optional, for your team)<textarea v-model="kitDraft.description" rows="2" maxlength="1000"></textarea></label>
+      </form>
+      <template #footer>
+        <button class="btn" @click="kitDraft = null">Cancel</button>
+        <button class="btn primary" type="submit" form="kit-form" :disabled="kitDraft.saving">{{ kitDraft.saving ? 'Saving…' : 'Save kit' }}</button>
+      </template>
+    </Modal>
+
+    <Modal v-if="conflict" :title="conflictByClient ? 'The client has replied' : 'This quote was changed by someone else'" @close="useTheirs">
+      <p v-if="conflictByClient">While you were editing, {{ conflict.clientResponse.name }} replied on the client link: <b>{{ REPLY_LABELS[conflict.clientResponse.action] }}</b> ({{ formatDateTime(conflict.clientResponse.at) }}).</p>
+      <p v-else>While you were editing, another person saved changes to {{ quote.number }} ({{ formatDateTime(conflict.updatedAt) }}).</p>
+      <p class="muted">Load the latest version (your unsaved edits will be lost), or keep yours{{ conflictByClient ? ' (the client’s reply is kept either way)' : ' and replace theirs' }}.</p>
       <template #footer>
         <button class="btn" @click="keepMine">Keep mine</button>
         <button class="btn primary" @click="useTheirs">Load their version</button>
@@ -1243,7 +1713,7 @@ const QuoteEditor = {
 const ProductsPage = {
   components: { MoneyInput, Modal },
   data() {
-    return { tab: 'ubiquiti', q: '', category: '', limit: 60, editing: null };
+    return { tab: 'ubiquiti', q: '', category: '', limit: 60, editing: null, kitEditing: null };
   },
   computed: {
     cat() {
@@ -1261,6 +1731,10 @@ const ProductsPage = {
     matches() {
       return searchProducts(this.pool, this.q, this.category);
     },
+    kits: () => state.kits.list,
+    kitsLoaded: () => state.kits.loaded,
+    // Price kits with the default rates from Settings.
+    kitQuote: () => ({ labourTypes: state.settings.labourTypes, markup: state.settings.markup, includeSurcharges: state.settings.includeSurcharges }),
   },
   watch: {
     tab() {
@@ -1270,10 +1744,46 @@ const ProductsPage = {
   },
   mounted() {
     loadCatalogue();
+    loadKits();
   },
   methods: {
     ...sharedMethods,
     sync: syncUbiquiti,
+    kitTotal(kit) {
+      const prices = storePriceIndex();
+      return kit.items.reduce((sum, i) => {
+        const now = i.source === 'ubiquiti' && prices[i.sku];
+        const item = now ? { ...i, basePrice: now.price, surcharge: now.surcharge || 0 } : i;
+        return sum + C.itemTotals(item, this.kitQuote).total;
+      }, 0);
+    },
+    kitLines(kit) {
+      return kit.items.map((i) => (i.kind === 'labour' ? `${hours(i.hours)} ${C.labourName(this.kitQuote, i.type)}` : `${i.qty} × ${i.name}`));
+    },
+    editKit(k) {
+      this.kitEditing = { id: k.id, name: k.name, description: k.description || '' };
+    },
+    async saveKitEdit() {
+      const e = this.kitEditing;
+      try {
+        await api('PUT', `/api/kits/${encodeURIComponent(e.id)}`, { name: e.name, description: e.description });
+        await loadKits(true);
+        this.kitEditing = null;
+        toast('Kit saved');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
+    async removeKit(k) {
+      if (!confirm(`Delete the kit “${k.name}”? Quotes that already use it keep their items.`)) return;
+      try {
+        await api('DELETE', `/api/kits/${encodeURIComponent(k.id)}`);
+        await loadKits(true);
+        toast('Kit deleted');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
     statusBadge: (s) => STATUS_BADGE[s],
     newProduct() {
       this.editing = { id: null, manufacturer: '', name: '', model: '', description: '', category: '', price: null, cost: null, image: '', url: '' };
@@ -1315,7 +1825,35 @@ const ProductsPage = {
     <nav class="tabs">
       <button :class="{ active: tab === 'ubiquiti' }" @click="tab = 'ubiquiti'">Ubiquiti UK store</button>
       <button :class="{ active: tab === 'custom' }" @click="tab = 'custom'">Our products <span class="count">{{ cat.products.filter(p => p.source === 'custom').length }}</span></button>
+      <button :class="{ active: tab === 'kits' }" @click="tab = 'kits'">Kits <span class="count" v-if="kitsLoaded">{{ kits.length }}</span></button>
     </nav>
+
+    <template v-if="tab === 'kits'">
+      <p class="hint">Kits are groups of items and labour you use often, such as a standard WiFi room. To make one, build an area on a quote and click <b>Save as kit</b> under it. To use one, click <b>+ Add product</b> on a quote and open <b>Kits</b>.</p>
+      <div class="card" v-if="!kitsLoaded"><div class="empty">Loading…</div></div>
+      <div class="card empty-state" v-else-if="!kits.length">
+        <div class="es-mark"></div>
+        <h2>No kits yet</h2>
+        <p class="muted">Save an area of a quote as a kit and it will appear here, ready to add to other quotes in one click.</p>
+      </div>
+      <div class="kit-list" v-else>
+        <section class="card kit-card" v-for="k in kits" :key="k.id">
+          <div class="kit-head">
+            <div class="thumb kit-thumb"><span></span><span></span><span></span></div>
+            <div class="kit-title">
+              <div class="strong">{{ k.name }}</div>
+              <div class="muted sm">{{ k.items.length }} line{{ k.items.length === 1 ? '' : 's' }} · about {{ money(kitTotal(k)) }} ex VAT at default rates</div>
+            </div>
+            <div class="kit-actions">
+              <button class="btn ghost sm" @click="editKit(k)">Rename</button>
+              <button class="btn ghost sm danger" @click="removeKit(k)">Delete</button>
+            </div>
+          </div>
+          <p class="muted sm kit-desc" v-if="k.description">{{ k.description }}</p>
+          <ul class="kit-lines"><li v-for="(l, i) in kitLines(k)" :key="i">{{ l }}</li></ul>
+        </section>
+      </div>
+    </template>
 
     <div class="card source-card" v-if="tab === 'ubiquiti'">
       <div>
@@ -1327,6 +1865,7 @@ const ProductsPage = {
       <button class="btn" @click="sync" :disabled="cat.syncing || ubiquiti.syncing">{{ cat.syncing || ubiquiti.syncing ? 'Updating…' : 'Refresh prices now' }}</button>
     </div>
 
+    <template v-if="tab !== 'kits'">
     <div class="toolbar-row">
       <input class="search" type="search" v-model="q" placeholder="Search by name, model or SKU">
       <select v-model="category"><option value="">All categories</option><option v-for="c in categories" :value="c">{{ c }}</option></select>
@@ -1366,6 +1905,18 @@ const ProductsPage = {
         </tbody>
       </table>
     </div>
+    </template>
+
+    <Modal v-if="kitEditing" title="Rename kit" @close="kitEditing = null">
+      <form class="form-grid" id="kit-edit-form" @submit.prevent="saveKitEdit">
+        <label class="span-2">Kit name<input v-model="kitEditing.name" required maxlength="120"></label>
+        <label class="span-2">Description (optional)<textarea v-model="kitEditing.description" rows="3" maxlength="1000"></textarea></label>
+      </form>
+      <template #footer>
+        <button class="btn" @click="kitEditing = null">Cancel</button>
+        <button class="btn primary" type="submit" form="kit-edit-form">Save</button>
+      </template>
+    </Modal>
 
     <Modal v-if="editing" :title="editing.id ? 'Edit product' : 'Add product'" @close="editing = null">
       <form class="form-grid" @submit.prevent="save" id="product-form">
@@ -1415,7 +1966,7 @@ const SettingsPage = {
       this.s.team.push({ name: '', role: '', email: '', phone: '' });
     },
     addLabourType() {
-      this.s.labourTypes.push({ id: `labour_${uid()}`, name: 'New labour type', rate: 5000 });
+      this.s.labourTypes.push({ id: `labour_${uid()}`, name: 'New labour type', rate: 5000, cost: null });
     },
     addScope() {
       this.s.defaultScope.push({ heading: 'New section', body: '' });
@@ -1463,11 +2014,12 @@ const SettingsPage = {
 
     <section class="card">
       <h2 class="card-title">Labour types and default hourly rates</h2>
-      <p class="muted sm">Rates exclude VAT. New quotes start with these; each quote can change its own rates.</p>
+      <p class="muted sm">Rates exclude VAT. New quotes start with these; each quote can change its own rates. “It costs us” is internal (for example an engineer's hourly cost) and is only used for the profit figure.</p>
+      <div class="rate-row rate-head"><span>Labour type</span><span>We charge per hour</span><span>It costs us per hour</span><span class="icon-btn-spacer"></span></div>
       <div class="rate-row" v-for="(t, i) in s.labourTypes" :key="t.id">
         <input v-model="t.name" aria-label="Labour type name">
-        <MoneyInput v-model="t.rate" />
-        <span class="muted sm">per hour</span>
+        <div class="rate-cell"><span class="rate-cell-label">We charge / hr</span><MoneyInput v-model="t.rate" /></div>
+        <div class="rate-cell"><span class="rate-cell-label">Costs us / hr</span><MoneyInput v-model="t.cost" placeholder="" /></div>
         <button v-if="!isCore(t.id)" class="icon-btn danger" title="Remove" @click="s.labourTypes.splice(i, 1)">✕</button>
         <span v-else class="icon-btn-spacer"></span>
       </div>
@@ -1495,9 +2047,20 @@ const SettingsPage = {
         <label>Valid for (days)<input type="number" min="1" v-model.number="s.validDays"></label>
         <label>VAT rate (%)<input type="number" min="0" step="0.5" v-model.number="s.vatRate"></label>
         <label>Markup on Ubiquiti store prices (%)<input type="number" step="0.5" v-model.number="s.markup"></label>
+        <label>Our trade discount off Ubiquiti store prices (%)<input type="number" step="0.5" min="0" max="100" v-model.number="s.costDiscount"><small class="muted">Internal, for the profit figure</small></label>
         <label class="check span-2"><input type="checkbox" v-model="s.includeSurcharges"> Include Ubiquiti surcharges in prices</label>
       </div>
       <h3 class="sub-title">What proposals show</h3>
+      <div class="layout-choice">
+        <label class="choice" :class="{ active: s.display.layout !== 'summary' }">
+          <input type="radio" value="detailed" v-model="s.display.layout">
+          <span><b>Every item</b><small>Each product with its quantity and price</small></span>
+        </label>
+        <label class="choice" :class="{ active: s.display.layout === 'summary' }">
+          <input type="radio" value="summary" v-model="s.display.layout">
+          <span><b>Area totals only</b><small>What's in each area, with one price per area</small></span>
+        </label>
+      </div>
       <div class="checks">
         <label class="check"><input type="checkbox" v-model="s.display.showImages"> Product images</label>
         <label class="check"><input type="checkbox" v-model="s.display.showItemPrices"> Price of each item</label>
