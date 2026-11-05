@@ -243,6 +243,9 @@ small { font-size: 12px; }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--text); }
 .btn.ghost:hover { background: var(--line-soft); }
 .btn.danger { color: var(--red); }
+.btn.danger-fill { background: var(--red); border-color: var(--red); color: #fff; }
+.btn.danger-fill:hover { background: var(--red); border-color: var(--red); filter: brightness(0.92); }
+.restart-check { margin: 4px 0 10px; }
 .btn.lg { padding: 10px 18px; font-size: 14px; }
 .btn.sm { padding: 4px 9px; font-size: 12px; }
 

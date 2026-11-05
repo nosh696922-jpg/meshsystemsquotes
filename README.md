@@ -127,6 +127,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v2` | Adds those features |
 | `v3-before-2-pages` | Lighter, simpler design, still with a full cover page |
 | `v3` | Lighter, simpler proposal and PDF design (no dark panels), printing on fewer pages: the cover details sit on page 1, with an optional separate cover page |
+| `v3.1` | Adds “Start again from 0001” in Settings, to reset quote numbers (and optionally delete all quotes) after testing |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s

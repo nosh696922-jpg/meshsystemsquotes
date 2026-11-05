@@ -1942,9 +1942,9 @@ const ProductsPage = {
 // ---- Settings page --------------------------------------------------------------
 
 const SettingsPage = {
-  components: { MoneyInput, AutoTextarea },
+  components: { MoneyInput, AutoTextarea, Modal },
   data() {
-    return { s: clone(state.settings), saving: false, dirty: false };
+    return { s: clone(state.settings), saving: false, dirty: false, restart: null };
   },
   watch: {
     s: {
@@ -1971,6 +1971,39 @@ const SettingsPage = {
     },
     addScope() {
       this.s.defaultScope.push({ heading: 'New section', body: '' });
+    },
+    quoteNumber(n) {
+      return `${this.s.quotePrefix || ''}${String(n).padStart(4, '0')}`;
+    },
+    async openRestart() {
+      this.restart = { count: null, range: '', deleteQuotes: false, confirm: '', busy: false };
+      try {
+        const list = await api('GET', '/api/quotes');
+        const numbers = list.map((q) => q.number).sort();
+        if (!this.restart) return;
+        this.restart.count = list.length;
+        this.restart.range = numbers.length > 1 ? `${numbers[0]} to ${numbers[numbers.length - 1]}` : numbers[0] || '';
+      } catch (err) {
+        this.restart = null;
+        toast(err.message, 'error');
+      }
+    },
+    async doRestart() {
+      const r = this.restart;
+      r.busy = true;
+      try {
+        const result = await api('POST', '/api/settings/restart-numbering', { deleteQuotes: r.deleteQuotes, confirm: r.confirm.trim().toUpperCase() });
+        // Show the new number without marking the settings as changed.
+        const wasDirty = this.dirty;
+        this.s.nextQuoteNumber = result.nextQuoteNumber;
+        state.settings.nextQuoteNumber = result.nextQuoteNumber;
+        nextTick(() => (this.dirty = wasDirty));
+        this.restart = null;
+        toast(`Quote numbers start again from ${this.quoteNumber(result.nextQuoteNumber)}${result.deleted ? ` (${result.deleted} quote${result.deleted === 1 ? '' : 's'} deleted)` : ''}`);
+      } catch (err) {
+        r.busy = false;
+        toast(err.message, 'error');
+      }
     },
     async save() {
       this.saving = true;
@@ -2044,7 +2077,7 @@ const SettingsPage = {
     <section class="card">
       <h2 class="card-title">Quote defaults</h2>
       <div class="form-grid">
-        <label>Quote number prefix<input v-model="s.quotePrefix"><small class="muted">Next quote: {{ s.quotePrefix }}{{ String(s.nextQuoteNumber).padStart(4, '0') }}</small></label>
+        <label>Quote number prefix<input v-model="s.quotePrefix"><small class="muted">Next quote: {{ quoteNumber(s.nextQuoteNumber) }} <button type="button" class="link sm" v-if="s.nextQuoteNumber > 1" @click="openRestart">Start again from {{ quoteNumber(1) }}</button></small></label>
         <label>Valid for (days)<input type="number" min="1" v-model.number="s.validDays"></label>
         <label>VAT rate (%)<input type="number" min="0" step="0.5" v-model.number="s.vatRate"></label>
         <label>Markup on Ubiquiti store prices (%)<input type="number" step="0.5" v-model.number="s.markup"></label>
@@ -2083,6 +2116,25 @@ const SettingsPage = {
       <label class="stack">Terms (one per line)<AutoTextarea v-model="s.defaultTerms" :rows="6" /></label>
       <p class="muted sm">These are example terms — please check them before sending proposals.</p>
     </section>
+
+    <Modal v-if="restart" title="Start quote numbers again" @close="restart = null">
+      <p style="margin-top: 0">The next new quote will be <b>{{ quoteNumber(1) }}</b>.</p>
+      <p class="muted" v-if="restart.count === null">Checking your quotes…</p>
+      <template v-else-if="restart.count">
+        <p>You have {{ restart.count }} quote{{ restart.count === 1 ? '' : 's' }} ({{ restart.range }}). {{ restart.count === 1 ? 'It needs' : 'They need' }} to be deleted first, so no two quotes end up with the same number.</p>
+        <label class="check restart-check"><input type="checkbox" v-model="restart.deleteQuotes"> <span>Delete all {{ restart.count }} quote{{ restart.count === 1 ? '' : 's' }} too, with their client links, views and versions. <b>This can't be undone.</b></span></label>
+        <label class="stack" v-if="restart.deleteQuotes">Type DELETE to confirm<input v-model="restart.confirm" autocomplete="off" placeholder="DELETE"></label>
+      </template>
+      <p class="muted" v-else>You have no quotes, so nothing else changes.</p>
+      <p class="muted sm">Settings, products and kits are kept.</p>
+      <template #footer>
+        <button class="btn" @click="restart = null">Cancel</button>
+        <button class="btn" :class="restart.deleteQuotes ? 'danger-fill' : 'primary'" @click="doRestart"
+          :disabled="restart.busy || restart.count === null || (restart.count > 0 && !(restart.deleteQuotes && restart.confirm.trim().toUpperCase() === 'DELETE'))">
+          {{ restart.busy ? 'Working…' : restart.deleteQuotes ? 'Delete quotes and start again' : 'Start again from ' + quoteNumber(1) }}
+        </button>
+      </template>
+    </Modal>
   </div>`,
 };
 
