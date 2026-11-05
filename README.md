@@ -125,7 +125,8 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | --- | --- |
 | `v1` | Before discounts, profit, client replies, view tracking, versions and kits |
 | `v2` | Adds those features |
-| `v3` | Lighter, simpler proposal and PDF design (white cover, no dark panels) |
+| `v3-before-2-pages` | Lighter, simpler design, still with a full cover page |
+| `v3` | Lighter, simpler proposal and PDF design (no dark panels), printing on fewer pages: the cover details sit on page 1, with an optional separate cover page |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s

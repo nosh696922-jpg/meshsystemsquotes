@@ -503,6 +503,7 @@ table.rates th small { text-transform: none; letter-spacing: 0; font-weight: 400
 .choice b { display: block; font-weight: 500; color: var(--ink); font-size: 13px; }
 .choice small { display: block; color: var(--muted); }
 .checks.dim { opacity: 0.55; }
+.cover-option { margin-top: 12px; }
 
 /* Summary sidebar */
 .summary h3 { font-size: 15px; margin-bottom: 12px; }

@@ -1567,6 +1567,7 @@ const QuoteEditor = {
               <label class="check"><input type="checkbox" v-model="quote.display.showSku"> Manufacturer and model numbers</label>
               <label class="check"><input type="checkbox" v-model="quote.display.showLabourDetail"> Labour under each item <small class="muted">(otherwise labour is shown as a summary)</small></label>
             </div>
+            <label class="check cover-option"><input type="checkbox" v-model="quote.display.coverPage"> Separate cover page <small class="muted">(adds a page; good for bigger proposals)</small></label>
           </section>
 
           <section class="card">
@@ -2066,6 +2067,7 @@ const SettingsPage = {
         <label class="check"><input type="checkbox" v-model="s.display.showItemPrices"> Price of each item</label>
         <label class="check"><input type="checkbox" v-model="s.display.showSku"> Manufacturer and model numbers</label>
         <label class="check"><input type="checkbox" v-model="s.display.showLabourDetail"> Labour under each item</label>
+        <label class="check"><input type="checkbox" v-model="s.display.coverPage"> Separate cover page</label>
       </div>
     </section>
 
