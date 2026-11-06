@@ -34,26 +34,34 @@
     return !NON_CATALOGUE_SOURCES.includes(item.source);
   }
 
+  // The markup and trade discount settings are for Ubiquiti store prices.
+  // Other catalogues bring their own selling price (Sonos UK price, Crestron
+  // MSRP) and, where known, their own cost (Crestron dealer price).
+  function usesStoreSettings(item) {
+    return item.source === 'ubiquiti';
+  }
+
   // Price per unit shown to the client, before any line discount (pence).
   function unitPrice(item, quote) {
     if (has(item.priceOverride)) return Math.round(num(item.priceOverride));
     const list = listPrice(item, quote);
-    const markup = isCatalogueItem(item) ? num(quote.markup) : 0;
+    const markup = usesStoreSettings(item) ? num(quote.markup) : 0;
     return Math.round(list * (1 + markup / 100));
   }
 
   // What one unit costs us (pence). Internal only, for the profit figure.
-  // Catalogue items cost the store price less our trade discount, unless a
-  // cost has been typed in. Other items without a cost count at their price.
+  // A cost on the line wins (typed in, or a Crestron dealer price). Ubiquiti
+  // items cost the store price less our trade discount. Anything else without
+  // a cost counts at its price (and the profit panel says so).
   function unitCost(item, quote) {
     if (has(item.costPrice)) return Math.round(num(item.costPrice));
     const list = listPrice(item, quote);
-    if (isCatalogueItem(item)) return Math.round(list * (1 - pct(quote.costDiscount) / 100));
+    if (usesStoreSettings(item)) return Math.round(list * (1 - pct(quote.costDiscount) / 100));
     return list;
   }
 
   function costKnown(item) {
-    return has(item.costPrice) || isCatalogueItem(item);
+    return has(item.costPrice) || usesStoreSettings(item);
   }
 
   function labourType(quote, typeId) {
@@ -226,6 +234,7 @@
     unitCost,
     costKnown,
     isCatalogueItem,
+    usesStoreSettings,
     labourRate,
     labourCostRate,
     labourName,

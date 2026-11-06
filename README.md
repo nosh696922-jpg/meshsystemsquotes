@@ -68,6 +68,16 @@ PDF directly using Edge or Chrome.
 - **Surcharges** – some Ubiquiti products carry a surcharge (currently “Memory”)
   that the store adds at checkout on top of the listed price. These are included
   in quote prices by default; you can switch that off per quote.
+- **Sonos catalogue** – about 130 products read from the Sonos UK shop
+  (sonos.com/en-gb/shop), with pictures and colour options. Sonos shows prices
+  including VAT; they're stored ex VAT (÷ 1.2). Refurbished stock is left out.
+  The shop doesn't show trade prices, so add our cost on each line for the
+  profit figure. Refreshes daily, like Ubiquiti.
+- **Crestron catalogue** – import Crestron's dealer price list (.xlsx) on
+  **Products → Crestron price list**. The “Alpha Listing” tab is read: the
+  MSRP is the selling price and the dealer price is our cost (both ex VAT).
+  Products marked “Contact for pricing” are left out. Import a newer list any
+  time; quotes keep their prices and show which lines have a new one.
 - **Other manufacturers** – add a one-off item while quoting, or save products
   to **Our products** to reuse them.
 - **Labour** – Installation, Commissioning, Programming and Project management
@@ -76,8 +86,9 @@ PDF directly using Edge or Chrome.
 - **Areas** – group the quote by room or system, each with its own description.
 - **Proposal text** – an introduction plus your own sections. Blank line = new
   paragraph, `- ` = bullet, `**bold**`.
-- **Pricing** – edit any unit price, apply a markup to store prices, set labour
-  rates and VAT per quote. Lines whose store price has changed are flagged.
+- **Pricing** – edit any unit price, apply a markup to Ubiquiti store prices, set
+  labour rates and VAT per quote. Lines whose catalogue price has changed are
+  flagged.
 - **Discounts** – a percentage off any item, and a percentage or fixed amount off
   the whole quote, with your own name for it (e.g. “Package saving”). The
   proposal shows what the client saves.
@@ -106,6 +117,8 @@ PDF directly using Edge or Chrome.
 | `lib/auth.js` | Team password sign-in |
 | `lib/store.js`, `lib/storage/` | Saving data (files locally, Upstash online) |
 | `lib/catalogues/ubiquiti.js` | Reads the Ubiquiti UK store |
+| `lib/catalogues/sonos.js` | Reads the Sonos UK shop |
+| `lib/catalogues/crestron.js`, `lib/xlsx.js` | Imports Crestron’s dealer price list (.xlsx) |
 | `lib/proposal.js`, `public/proposal.css` | The client-facing proposal |
 | `lib/client.js` | Client views and replies (accept, changes, decline) |
 | `lib/revisions.js`, `lib/kits.js` | Saved versions of quotes, and kits |
@@ -116,9 +129,16 @@ PDF directly using Edge or Chrome.
 
 ## Adding another manufacturer later
 
-Create a file in `lib/catalogues/` that exports `{ id, name, sync() }`, where
-`sync()` returns products in the same shape as the Ubiquiti one, then add it to
-`SOURCES` in `lib/catalogue.js`.
+Create a file in `lib/catalogues/`, then list it in `lib/catalogue.js`:
+
+- **Read from a website** (like `ubiquiti.js`, `sonos.js`): export
+  `{ id, name, label, tabName, site, sync() }`, where `sync()` returns products
+  in the same shape, and add it to `SOURCES`. It refreshes daily.
+- **Imported from a price list file** (like `crestron.js`): export
+  `{ id, name, label, tabName, importFile(buffer, fileName) }` and add it to
+  `IMPORTED`. `lib/xlsx.js` reads Excel files.
+
+The Products page and the product picker show a tab for each one automatically.
 
 ## Rolling back to an earlier version
 
@@ -133,6 +153,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v3.1` | Adds “Start again from 0001” in Settings, to reset quote numbers (and optionally delete all quotes) after testing |
 | `v3.2` | The quoting app restyled to match the Mesh website (navy header, page tops with moving nodes, Inter and Poppins), smoother light/dark switching and animations throughout, and no box around clicked tick boxes |
 | `v3.3` | The client proposal in the website’s colours (navy top bar and moving nodes on screen; printing stays light), the Labour section shows only each service and its total (no hours or hourly rates), and **Download PDF** works again on your own computer |
+| `v4` | More catalogues: Sonos (read daily from the Sonos UK shop) and Crestron (import the dealer price list .xlsx; MSRP = price, dealer = our cost). Markup and trade discount now apply to Ubiquiti only. Rolling back to `v3.3` hides Sonos and Crestron products, but quote lines already added keep their prices |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s
@@ -149,9 +170,9 @@ and a quote marked “Changes requested” shows no status until you pick one.
 
 ## Known limits of this proof of concept
 
-- Ubiquiti data is read from the store’s public pages. If Ubiquiti changes their
-  site, or blocks requests from Vercel’s servers, the price refresh stops working
-  (the last good copy is kept and the Products page shows the error).
+- Ubiquiti and Sonos data is read from their shops’ public pages. If either
+  changes their site, or blocks requests from Vercel’s servers, the price refresh
+  stops working (the last good copy is kept and the Products page shows the error).
 - One shared team password, no individual accounts.
 - Quotes made on your own computer stay there; the online version starts empty.
 - Default labour rates and terms are placeholders – set your own in Settings.
