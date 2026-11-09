@@ -92,14 +92,19 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
   Products marked “Contact for pricing” are left out. Import a newer list any
   time; quotes keep their prices and show which lines have a new one.
 - **Habitech catalogue** – our Habitech trade account (about 10,700 products,
-  every brand Habitech sells us). Too many to copy in, so **Add product →
-  Habitech** searches Habitech as you type: name, brand or part code, with typos
-  forgiven. The price is Habitech's SRP and our cost is our trade price (both ex
-  VAT), and each result shows live stock. Quotes check their Habitech lines when
-  you open them, flag any new price, and show stock on each line. The client's
-  proposal shows the maker's part number, not Habitech's stock code. Products
-  Habitech hasn't priced for us can't be added (email Habitech to add the brand).
-  Needs the Habitech API key (see *Connecting Habitech*).
+  every brand Habitech sells us). The app keeps a copy of the whole list, so
+  **Products → Habitech** and **Add product → Habitech** show everything, with a
+  brand filter and instant search. The first copy takes about 3 minutes
+  (**Copy full list**; it also starts by itself overnight); after that it
+  refreshes every night (new and withdrawn products, prices and stock), or click
+  **Refresh now**. If nothing in the list matches a search, the app searches
+  Habitech directly. The price is Habitech's SRP and our cost is our trade price
+  (both ex VAT), with stock on each product. Today's price is checked when you
+  add a product, and quotes check their Habitech lines when you open them, flag
+  any new price, and show stock on each line. The client's proposal shows the
+  maker's part number, not Habitech's stock code. Products Habitech hasn't
+  priced for us aren't listed (email Habitech to add the brand). Needs the
+  Habitech API key (see *Connecting Habitech*).
 - **Other manufacturers** – add a one-off item while quoting, or save products
   to **Our products** to reuse them.
 - **Labour** – Installation, Commissioning, Programming and Project management
@@ -166,10 +171,11 @@ Create a file in `lib/catalogues/`, then list it in `lib/catalogue.js`:
 - **Imported from a price list file** (like `crestron.js`): export
   `{ id, name, label, tabName, importFile(buffer, fileName) }` and add it to
   `IMPORTED`. `lib/xlsx.js` reads Excel files.
-- **Searched live through a supplier's API** (like `habitech.js`, for
-  catalogues too big to copy in): export `{ id, name, label, tabName,
-  configured(), search(q, offset), product(sku), prices(skus), status() }` and
-  add it to `LIVE`.
+- **Read through a supplier's API** (like `habitech.js`, for big catalogues):
+  export `{ id, name, label, tabName, configured(), search(q, offset),
+  product(sku), prices(skus), status(), startCopy(), continueCopy(job,
+  deadline), finishCopy(job), refreshCopy(copy, deadline) }` and add it to
+  `LIVE`. The copy is made in chunks that fit Vercel's one-minute limit.
 
 The Products page and the product picker show a tab for each one automatically.
 
@@ -188,6 +194,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v3.3` | The client proposal in the website’s colours (navy top bar and moving nodes on screen; printing stays light), the Labour section shows only each service and its total (no hours or hourly rates), and **Download PDF** works again on your own computer |
 | `v4` | More catalogues: Sonos (read daily from the Sonos UK shop) and Crestron (import the dealer price list .xlsx; MSRP = price, dealer = our cost). Markup and trade discount now apply to Ubiquiti only. Rolling back to `v3.3` hides Sonos and Crestron products, but quote lines already added keep their prices |
 | `v4.1` | Habitech catalogue (search Habitech live with our trade prices and stock; needs `HABITECH_API_KEY` in Vercel), each area’s labour shown at the bottom of that area in proposals, and a Sonos trade discount alongside the Ubiquiti one, both at the top of their Products tabs. Rolling back to `v4` hides Habitech products and puts labour back in one section, but quote lines already added keep their prices |
+| `v4.2` | The Habitech tab lists every product (a copy of the whole list, refreshed nightly) with a brand filter and instant search, falling back to searching Habitech when nothing matches. Today’s price is checked when you add a Habitech product. Rolling back to `v4.1` goes back to search-only (the saved copy is simply ignored) |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s
@@ -207,8 +214,10 @@ and a quote marked “Changes requested” shows no status until you pick one.
 - Ubiquiti and Sonos data is read from their shops’ public pages. If either
   changes their site, or blocks requests from Vercel’s servers, the price refresh
   stops working (the last good copy is kept and the Products page shows the error).
-- Habitech search needs Habitech’s API to be up. If it isn’t, the Habitech tab
-  says so; quote lines already added keep their prices.
+- The Habitech list is a copy, refreshed nightly, so a product added to
+  Habitech today may not be listed until tomorrow (search for its exact part
+  code and, if the list has no match, the app finds it straight from Habitech). If Habitech’s API is down, the copy still works
+  and quote lines keep their prices.
 - One shared team password, no individual accounts.
 - Quotes made on your own computer stay there; the online version starts empty.
 - Default labour rates and terms are placeholders – set your own in Settings.

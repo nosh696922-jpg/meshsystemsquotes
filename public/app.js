@@ -483,12 +483,13 @@ const Modal = {
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
-function searchProducts(products, query, category) {
+// `filter` limits the list to one value of `filterKey` (a category, or a brand).
+function searchProducts(products, query, filter, filterKey = 'category') {
   const words = query.toLowerCase().split(/[\s-]+/).filter(Boolean);
   const nq = norm(query);
   const out = [];
   for (const p of products) {
-    if (category && p.category !== category) continue;
+    if (filter && p[filterKey] !== filter) continue;
     if (words.length) {
       if (!p._hay) {
         // Searchable text: "primary" (name, model, SKUs) and everything.
@@ -534,6 +535,79 @@ async function loadLiveStatus(id) {
 
 const isLiveSource = (id) => catalogueSources().some((s) => s.id === id && s.kind === 'live');
 
+// The copy of a live catalogue's whole list, for browsing. Loaded when its tab
+// is first opened (it's big, so other pages don't wait for it).
+const liveCopies = reactive({}); // id → { loading, loaded, products, fetchedAt, refreshedAt }
+const STOCK_FROM_CODE = { i: 'in_stock', l: 'low_stock', o: 'out_of_stock' };
+
+// A compact row from the server: [sku, name, brand, mpn, category, image, cost, srp, stock, qty, description].
+function liveProductFromRow(source, row, imageBase) {
+  const [sku, name, brand, mpn, category, image, cost, srp, stock, qty, description] = row;
+  const price = srp ?? cost;
+  const img = image ? (/^https?:/.test(image) ? image : imageBase + image) : null;
+  const variant = { sku, displaySku: sku, label: '', price, cost, surcharge: 0, status: 'Available', noSrp: srp == null, stock: STOCK_FROM_CODE[stock] || null, qty };
+  return {
+    id: `${source}:${sku}`,
+    source,
+    manufacturer: brand || 'Habitech',
+    name,
+    shortName: name,
+    model: mpn || sku,
+    description: description || name,
+    category: category || '',
+    subCategory: '',
+    image: img,
+    imageLarge: img,
+    url: null,
+    price,
+    cost,
+    status: 'Available',
+    defaultSku: sku,
+    variants: [variant],
+  };
+}
+
+async function loadLiveCopy(id, force = false) {
+  const c = liveCopies[id];
+  if (c?.loading || (c?.loaded && !force)) return;
+  liveCopies[id] = { ...(c || {}), loading: true };
+  try {
+    const data = await api('GET', `/api/catalogue/${id}/products`);
+    // Sorted by brand, then name. Freeze the list (not each product: search
+    // adds a cached index to them).
+    const list = data.rows ? data.rows.map((r) => liveProductFromRow(id, r, data.imageBase || '')) : null;
+    if (list) list.sort((a, b) => a.manufacturer.localeCompare(b.manufacturer) || a.name.localeCompare(b.name));
+    const products = list ? Object.freeze(list) : null;
+    liveCopies[id] = { loading: false, loaded: true, products, fetchedAt: data.fetchedAt || null, refreshedAt: data.refreshedAt || null };
+  } catch (err) {
+    liveCopies[id] = { ...(c || {}), loading: false, loaded: Boolean(c?.loaded), error: err.message };
+  }
+}
+
+// Copy (or re-copy) a live catalogue's whole list. The server does about 40
+// seconds at a time, so keep asking until it's done.
+async function copyLiveCatalogue(id, restart = false) {
+  if (state.catalogue.syncing) return;
+  state.catalogue.syncing = id;
+  const label = (catalogueSources().find((s) => s.id === id) || {}).label || id;
+  try {
+    for (let i = 0; i < 30; i++) {
+      const s = await api('POST', `/api/catalogue/${id}/copy`, { restart: restart && i === 0 });
+      liveStatus[id] = { ...s, loading: false };
+      if (!s.job) break;
+      if (s.busy) await new Promise((r) => setTimeout(r, 5000));
+    }
+    await loadLiveCopy(id, true);
+    const n = liveCopies[id]?.products?.length || 0;
+    toast(`${label} list ${restart ? 'copied again' : 'updated'}: ${n.toLocaleString('en-GB')} products`);
+  } catch (err) {
+    toast(`${label}: ${err.message}`, 'error');
+    loadLiveStatus(id);
+  } finally {
+    state.catalogue.syncing = false;
+  }
+}
+
 // "In stock (48)", "Low stock (3)", "Out of stock · due 12 December 2026".
 function stockText(v) {
   if (!v || !v.stock) return '';
@@ -553,8 +627,32 @@ const liveSearchMixin = {
     return { live: { ...BLANK_LIVE }, loadingOptions: null };
   },
   computed: {
-    isLive() {
+    isLiveTab() {
       return this.source?.kind === 'live';
+    },
+    // The copied list of everything, once it has loaded.
+    copy() {
+      return this.isLiveTab ? liveCopies[this.tab] || null : null;
+    },
+    hasCopy() {
+      return Boolean(this.copy?.products?.length);
+    },
+    copyLoading() {
+      return this.isLiveTab && Boolean(this.copy?.loading) && !this.copy?.loaded;
+    },
+    // Search Habitech directly: when there's no copy yet, or nothing in the
+    // copy matches what was typed.
+    isLive() {
+      if (!this.isLiveTab || this.copyLoading) return false;
+      if (!this.hasCopy) return true;
+      return this.q.trim().length >= 2 && !this.category && !this.matches.length;
+    },
+    // Live catalogues are filtered by brand; the others by category.
+    filterKey() {
+      return this.isLiveTab ? 'manufacturer' : 'category';
+    },
+    filterLabel() {
+      return this.isLiveTab ? 'All brands' : this.tab === 'crestron' ? 'All ranges' : 'All categories';
     },
     liveInfo() {
       return liveStatus[this.tab] || null;
@@ -564,11 +662,15 @@ const liveSearchMixin = {
     q() {
       if (this.isLive) this.queueLiveSearch();
     },
+    isLive(on) {
+      if (on) this.queueLiveSearch(0);
+    },
     tab() {
-      if (!this.isLive) return;
+      if (!this.isLiveTab) return;
       loadLiveStatus(this.tab);
+      loadLiveCopy(this.tab);
       this.live = { ...BLANK_LIVE };
-      this.queueLiveSearch(0);
+      if (this.isLive) this.queueLiveSearch(0);
     },
   },
   beforeUnmount() {
@@ -659,13 +761,14 @@ const ProductPicker = {
       return this.catalogues.find((s) => s.id === this.tab) || null;
     },
     pool() {
+      if (this.isLiveTab) return this.copy?.products || [];
       return this.cat.products.filter((p) => p.source === this.tab);
     },
     categories() {
-      return [...new Set(this.pool.map((p) => p.category))].sort();
+      return [...new Set(this.pool.map((p) => p[this.filterKey]).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     },
     matches() {
-      return searchProducts(this.pool, this.q, this.category);
+      return searchProducts(this.pool, this.q, this.category, this.filterKey);
     },
     results() {
       return this.isLive ? this.live.products : this.matches.slice(0, this.limit);
@@ -740,9 +843,20 @@ const ProductPicker = {
     qtyOf(p) {
       return this.qtys[p.id] ?? 1;
     },
-    add(p) {
-      const v = this.variantOf(p);
-      const item = itemFromProduct(p, v, this.qtyOf(p));
+    async add(p) {
+      let v = this.variantOf(p);
+      const qty = this.qtyOf(p);
+      // The copied list is up to a day old: add Habitech products at today's price.
+      if (isLiveSource(p.source) && this.hasCopy && !this.isLive) {
+        try {
+          const { prices } = await api('POST', `/api/catalogue/${p.source}/prices`, { skus: [v.sku] });
+          const now = prices[v.sku];
+          if (now && now.status !== 'NoPrice') v = { ...v, price: now.price, cost: now.cost, stock: now.stock, qty: now.qty };
+        } catch {
+          /* add at the copied price; the quote checks it again */
+        }
+      }
+      const item = itemFromProduct(p, v, qty);
       this.$emit('add', item);
       this.added += item.qty;
       toast(`Added ${item.qty} × ${item.name}`);
@@ -817,15 +931,19 @@ const ProductPicker = {
       </template>
 
       <template v-else-if="tab !== 'manual'">
-        <div class="picker-filters" :class="{ 'search-only': isLive }">
+        <div class="picker-filters" :class="{ 'search-only': isLiveTab && !hasCopy }">
           <input ref="search" class="search" type="search" v-model="q" :placeholder="searchHint">
-          <select v-if="!isLive" v-model="category">
-            <option value="">All {{ tab === 'crestron' ? 'ranges' : 'categories' }}</option>
+          <select v-if="!isLiveTab || hasCopy" v-model="category">
+            <option value="">{{ filterLabel }}</option>
             <option v-for="c in categories" :value="c">{{ c }}</option>
           </select>
         </div>
 
-        <p class="picker-meta" v-if="isLive && source.configured !== false">
+        <p class="picker-meta" v-if="isLiveTab && hasCopy && !isLive">
+          All {{ pool.length.toLocaleString('en-GB') }} {{ source.label }} products · price is the SRP and our cost is our trade price, both ex VAT · today’s price is checked as you add<template v-if="q || category"> · {{ matches.length.toLocaleString('en-GB') }} match{{ matches.length === 1 ? '' : 'es' }}</template>
+        </p>
+        <p class="picker-meta" v-else-if="isLive && hasCopy">Nothing in the {{ source.label }} list matches, so these come straight from {{ source.label }}<template v-if="live.products.length"> · {{ live.total.toLocaleString('en-GB') }} match{{ live.total === 1 ? '' : 'es' }}</template></p>
+        <p class="picker-meta" v-else-if="isLive && source.configured !== false">
           Live from {{ source.label }}<template v-if="liveInfo && liveInfo.count"> ({{ liveInfo.count.toLocaleString('en-GB') }} products)</template> · price is the SRP and our cost is our trade price, both ex VAT<template v-if="live.products.length"> · {{ live.total.toLocaleString('en-GB') }} match{{ live.total === 1 ? '' : 'es' }}</template>
         </p>
 
@@ -838,16 +956,17 @@ const ProductPicker = {
           MSRP from the {{ source.label }} price list<template v-if="source.priceListDate"> dated {{ formatDay(source.priceListDate) }}</template>, ex VAT · our cost (dealer price) is filled in for the profit figure
         </p>
 
-        <div v-if="isLive && source.configured === false" class="empty">
+        <div v-if="isLiveTab && source.configured === false" class="empty">
           {{ source.label }} isn’t connected yet. Add the API key from {{ source.label }} as <b>HABITECH_API_KEY</b> in Vercel → Settings → Environment Variables, then redeploy.
         </div>
+        <div v-else-if="copyLoading" class="empty loading">Loading {{ source.label }} products…</div>
         <div v-else-if="isLive && live.error" class="empty error-text">{{ live.error }}</div>
         <div v-else-if="isLive && live.loading && !live.products.length" class="empty loading">Searching {{ source.label }}…</div>
         <div v-else-if="isLive && !results.length" class="empty">
           <template v-if="q.trim().length < 2">Type a product name, brand or part code to search {{ source.label }}<template v-if="liveInfo && liveInfo.count">’s {{ liveInfo.count.toLocaleString('en-GB') }} products</template>.</template>
           <template v-else>Nothing at {{ source.label }} matches “{{ q }}”.</template>
         </div>
-        <div v-else-if="cat.loading && !cat.loaded && !isLive" class="empty loading">Loading products…</div>
+        <div v-else-if="cat.loading && !cat.loaded && !isLiveTab" class="empty loading">Loading products…</div>
         <div v-else-if="!results.length" class="empty">
           <template v-if="tab === 'custom' && !pool.length">No saved products yet. Use <b>One-off item</b> and tick “Save to Our products”, or add them on the Products page.</template>
           <template v-else-if="source && source.kind === 'import' && !pool.length">No {{ source.label }} price list yet. Import it on the <a href="#/products" @click="$emit('close')">Products page</a>.</template>
@@ -2034,16 +2153,21 @@ const ProductsPage = {
       return this.cat.syncing === this.tab || this.cat.importing === this.tab || Boolean(this.source && this.source.syncing);
     },
     pool() {
+      if (this.isLiveTab) return this.copy?.products || [];
       return this.cat.products.filter((p) => p.source === this.tab);
     },
     categories() {
-      return [...new Set(this.pool.map((p) => p.category))].sort();
+      return [...new Set(this.pool.map((p) => p[this.filterKey]).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     },
     matches() {
-      return searchProducts(this.pool, this.q, this.category);
+      return searchProducts(this.pool, this.q, this.category, this.filterKey);
     },
     rows() {
       return this.isLive ? this.live.products : this.matches.slice(0, this.limit);
+    },
+    // A copy of a live catalogue being made (or refreshed) right now.
+    copyJob() {
+      return this.isLiveTab ? this.liveInfo?.job || null : null;
     },
     kits: () => state.kits.list,
     kitsLoaded: () => state.kits.loaded,
@@ -2066,6 +2190,9 @@ const ProductsPage = {
     formatDay,
     sync() {
       syncCatalogue(this.tab);
+    },
+    copyList() {
+      copyLiveCatalogue(this.tab);
     },
     chooseImport() {
       this.$refs.importFile.value = '';
@@ -2095,7 +2222,7 @@ const ProductsPage = {
       }
     },
     countOf(id) {
-      if (isLiveSource(id)) return liveStatus[id]?.count ?? null;
+      if (isLiveSource(id)) return liveCopies[id]?.products?.length ?? liveStatus[id]?.copy?.count ?? liveStatus[id]?.count ?? null;
       return this.cat.loaded ? this.cat.products.filter((p) => p.source === id).length : null;
     },
     kitTotal(kit) {
@@ -2249,32 +2376,48 @@ const ProductsPage = {
           <div class="muted sm">Add the API key from {{ source.label }} as <b>HABITECH_API_KEY</b> in Vercel → Settings → Environment Variables (tick <b>Sensitive</b>), then redeploy. On your own computer, it goes in the <b>.env</b> file in the app’s folder.</div>
         </template>
         <template v-else>
-          <div class="strong"><template v-if="liveInfo && liveInfo.count">{{ liveInfo.count.toLocaleString('en-GB') }} products</template><template v-else>Products</template> from our {{ source.label }} trade account</div>
-          <div class="muted sm">
-            Searched live as you type, so prices and stock are always {{ source.label }}’s latest<template v-if="liveInfo && liveInfo.syncedAt"> (last updated by {{ source.label }} {{ timeAgo(liveInfo.syncedAt) }})</template>.
-            The price is {{ source.label }}’s SRP and our cost is our trade price, both ex VAT. Quotes check their {{ source.label }} lines each time you open them.
+          <div class="strong">
+            <template v-if="hasCopy">{{ pool.length.toLocaleString('en-GB') }} products from our {{ source.label }} trade account</template>
+            <template v-else-if="liveInfo && liveInfo.count">{{ liveInfo.count.toLocaleString('en-GB') }} products in our {{ source.label }} trade account</template>
+            <template v-else>Our {{ source.label }} trade account</template>
+          </div>
+          <div class="muted sm" v-if="copyJob">
+            Copying the full list from {{ source.label }}: {{ copyJob.categoriesDone }} of {{ copyJob.categoriesTotal }} categories, {{ copyJob.products.toLocaleString('en-GB') }} products so far.
+            <template v-if="busy">This takes about 3 minutes; keep this page open.</template>
+            <template v-else>It carries on overnight, or click Carry on copying.</template>
+          </div>
+          <div class="muted sm" v-else-if="hasCopy">
+            Updated {{ formatDateTime(copy.refreshedAt || copy.fetchedAt) }} ({{ timeAgo(copy.refreshedAt || copy.fetchedAt) }}); refreshes every night. The price is {{ source.label }}’s SRP and our cost is our trade price, both ex VAT.
+            Today’s price is checked when you add a product, and quotes check their {{ source.label }} lines each time you open them.
+          </div>
+          <div class="muted sm" v-else>
+            Search {{ source.label }} live below, or copy the full list (about 3 minutes) to browse everything here and in the product picker. After that it refreshes every night.
           </div>
           <div class="error-text sm" v-if="liveInfo && liveInfo.error">{{ liveInfo.error }}</div>
         </template>
       </div>
+      <button v-if="source.configured !== false && !(liveInfo && liveInfo.configured === false)" class="btn" :class="{ primary: !hasCopy && !copyJob }" @click="copyList" :disabled="Boolean(cat.syncing)">
+        {{ busy ? (hasCopy && !copyJob ? 'Refreshing…' : 'Copying…') : copyJob ? 'Carry on copying' : hasCopy ? 'Refresh now' : 'Copy full list' }}
+      </button>
     </div>
 
     <template v-if="tab !== 'kits'">
     <div class="toolbar-row">
-      <input class="search" type="search" v-model="q" :placeholder="isLive ? 'Search ' + source.label + ' by name, brand or part code' : 'Search by name, model or SKU'">
-      <select v-if="!isLive" v-model="category"><option value="">All {{ tab === 'crestron' ? 'ranges' : 'categories' }}</option><option v-for="c in categories" :value="c">{{ c }}</option></select>
+      <input class="search" type="search" v-model="q" :placeholder="isLiveTab ? 'Search ' + source.label + ' by name, brand or part code' : 'Search by name, model or SKU'">
+      <select v-if="!isLiveTab || hasCopy" v-model="category"><option value="">{{ filterLabel }}</option><option v-for="c in categories" :value="c">{{ c }}</option></select>
       <span class="muted sm" v-if="!isLive">{{ matches.length.toLocaleString('en-GB') }} product{{ matches.length === 1 ? '' : 's' }}</span>
-      <span class="muted sm" v-else-if="live.products.length">{{ live.total.toLocaleString('en-GB') }} match{{ live.total === 1 ? '' : 'es' }}</span>
+      <span class="muted sm" v-else-if="live.products.length">{{ live.total.toLocaleString('en-GB') }} match{{ live.total === 1 ? '' : 'es' }}{{ hasCopy ? ', straight from ' + source.label : '' }}</span>
     </div>
 
     <div class="card table-card" :class="{ refreshing: isLive && live.loading && live.products.length }">
-      <template v-if="isLive">
+      <div class="empty loading" v-if="copyLoading">Loading {{ source.label }} products…</div>
+      <template v-else-if="isLive">
         <div class="empty" v-if="source.configured === false">Connect {{ source.label }} (see above) to search its products here.</div>
         <div class="empty error-text" v-else-if="live.error">{{ live.error }}</div>
         <div class="empty loading" v-else-if="live.loading && !live.products.length">Searching {{ source.label }}…</div>
         <div class="empty" v-else-if="!live.products.length">{{ q.trim().length < 2 ? 'Type a product name, brand or part code to search ' + source.label + '.' : 'Nothing at ' + source.label + ' matches “' + q + '”.' }}</div>
       </template>
-      <div class="empty loading" v-else-if="cat.loading && !cat.loaded">Loading…</div>
+      <div class="empty loading" v-else-if="cat.loading && !cat.loaded && !isLiveTab">Loading…</div>
       <div class="empty" v-else-if="!matches.length">
         <template v-if="tab === 'custom' && !pool.length">No products yet. Add products from other manufacturers here so you can reuse them on quotes.</template>
         <template v-else-if="source && source.kind === 'import' && !pool.length">Import the price list above to see the products here.</template>
@@ -2288,7 +2431,7 @@ const ProductsPage = {
             <td class="thumb-cell"><div class="thumb"><img v-if="p.image" :src="p.image" alt="" loading="lazy"></div></td>
             <td>
               <div class="strong">{{ p.name }}</div>
-              <div class="muted sm">{{ p.manufacturer }} · {{ isLive ? p.defaultSku : p.model }}<span v-if="isLive && p.model !== p.defaultSku"> · part {{ p.model }}</span><span v-if="p.variants.length > 1"> · {{ p.variants.length }} options</span><span v-if="p.hasOptions"> · sold in options</span></div>
+              <div class="muted sm">{{ p.manufacturer }} · {{ isLiveTab ? p.defaultSku : p.model }}<span v-if="isLiveTab && p.model !== p.defaultSku"> · part {{ p.model }}</span><span v-if="p.variants.length > 1"> · {{ p.variants.length }} options</span><span v-if="p.hasOptions"> · sold in options</span></div>
               <div class="stock sm" v-if="stockText(p.variants[0])" :class="p.variants[0].stock">{{ stockText(p.variants[0]) }}</div>
             </td>
             <td class="muted">{{ p.category }}<span v-if="p.subCategory"> / {{ p.subCategory }}</span></td>
