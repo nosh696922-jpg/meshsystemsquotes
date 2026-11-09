@@ -6,6 +6,8 @@
 // Online it runs on Vercel instead (see api/index.js and README.md).
 // No external packages needed; just Node.js 18 or newer.
 
+require('./lib/env'); // private settings from .env (first, so the rest can see them)
+
 const http = require('http');
 const os = require('os');
 

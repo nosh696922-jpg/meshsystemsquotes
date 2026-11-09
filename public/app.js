@@ -289,6 +289,7 @@ const KNOWN_CATALOGUES = [
   { id: 'ubiquiti', label: 'Ubiquiti', tabName: 'Ubiquiti UK store', kind: 'web' },
   { id: 'sonos', label: 'Sonos', tabName: 'Sonos UK shop', kind: 'web' },
   { id: 'crestron', label: 'Crestron', tabName: 'Crestron price list', kind: 'import' },
+  { id: 'habitech', label: 'Habitech', tabName: 'Habitech', kind: 'live' },
 ];
 function catalogueSources() {
   const list = state.catalogue.sources.filter((s) => !s.custom);
@@ -299,6 +300,7 @@ const SEARCH_HINTS = {
   ubiquiti: 'Search Ubiquiti products, e.g. U7 Pro, USW-24-PoE, doorbell',
   sonos: 'Search Sonos, e.g. Arc Ultra, Era 100, Sub Mini, Amp',
   crestron: 'Search Crestron models, e.g. TSW-1070, DM-NVX, HZ2',
+  habitech: 'Search Habitech by name, brand or part code, e.g. VX66R, HDMI cable, Sonance',
   custom: 'Search our products',
 };
 
@@ -513,12 +515,125 @@ function searchProducts(products, query, category) {
   return out.map((x) => x.p);
 }
 
-const STATUS_BADGE = { SoldOut: 'Sold out', ComingSoon: 'Coming soon', RegionNotAvailable: 'Unavailable' };
+const STATUS_BADGE = { SoldOut: 'Sold out', ComingSoon: 'Coming soon', RegionNotAvailable: 'Unavailable', NoPrice: 'No trade price', Discontinued: 'Discontinued' };
+
+// ---- Live catalogues (Habitech) ---------------------------------------------------
+// Too big to load into the page, so they're searched on the server as you type.
+
+const liveStatus = reactive({}); // catalogue id → { configured, count, syncedAt, error }
+
+async function loadLiveStatus(id) {
+  if (liveStatus[id]?.loading) return;
+  liveStatus[id] = { ...(liveStatus[id] || {}), loading: true };
+  try {
+    liveStatus[id] = { ...(await api('GET', `/api/catalogue/${id}/status`)), loading: false };
+  } catch (err) {
+    liveStatus[id] = { configured: true, error: err.message, loading: false };
+  }
+}
+
+const isLiveSource = (id) => catalogueSources().some((s) => s.id === id && s.kind === 'live');
+
+// "In stock (48)", "Low stock (3)", "Out of stock · due 12 December 2026".
+function stockText(v) {
+  if (!v || !v.stock) return '';
+  const qty = v.qty != null ? ` (${v.qty})` : '';
+  if (v.stock === 'in_stock') return `In stock${qty}`;
+  if (v.stock === 'low_stock') return `Low stock${qty}`;
+  if (v.stock === 'out_of_stock') return `Out of stock${v.restockDate ? ` · due ${formatDay(v.restockDate)}` : ''}`;
+  return '';
+}
+
+const BLANK_LIVE = { key: '', products: [], total: 0, hasMore: false, loading: false, error: null, fuzzy: false, didYouMean: null };
+
+// Search-as-you-type for a live catalogue. Used by the product picker and the
+// Products page; the component provides `tab`, `q` and `source`.
+const liveSearchMixin = {
+  data() {
+    return { live: { ...BLANK_LIVE }, loadingOptions: null };
+  },
+  computed: {
+    isLive() {
+      return this.source?.kind === 'live';
+    },
+    liveInfo() {
+      return liveStatus[this.tab] || null;
+    },
+  },
+  watch: {
+    q() {
+      if (this.isLive) this.queueLiveSearch();
+    },
+    tab() {
+      if (!this.isLive) return;
+      loadLiveStatus(this.tab);
+      this.live = { ...BLANK_LIVE };
+      this.queueLiveSearch(0);
+    },
+  },
+  beforeUnmount() {
+    clearTimeout(this.liveTimer);
+  },
+  methods: {
+    stockText,
+    queueLiveSearch(delay = 300) {
+      clearTimeout(this.liveTimer);
+      this.liveTimer = setTimeout(() => this.runLiveSearch(), delay);
+    },
+    async runLiveSearch(more = false) {
+      const id = this.tab;
+      const q = this.q.trim();
+      const key = `${id}|${q.toLowerCase()}`;
+      if (q.length < 2) {
+        this.liveSeq = (this.liveSeq || 0) + 1;
+        this.live = { ...BLANK_LIVE, key };
+        return;
+      }
+      if (!more && key === this.live.key && !this.live.error) return;
+      const seq = (this.liveSeq = (this.liveSeq || 0) + 1);
+      const offset = more ? this.live.products.length : 0;
+      this.live.key = key;
+      this.live.loading = true;
+      this.live.error = null;
+      try {
+        const r = await api('GET', `/api/catalogue/${id}/search?q=${encodeURIComponent(q)}&offset=${offset}`);
+        if (seq !== this.liveSeq) return; // a newer search has started
+        Object.assign(this.live, {
+          products: more ? [...this.live.products, ...r.products] : r.products,
+          total: r.total,
+          hasMore: r.hasMore,
+          fuzzy: r.fuzzy,
+          didYouMean: r.didYouMean,
+        });
+      } catch (err) {
+        if (seq !== this.liveSeq) return;
+        this.live.error = err.message;
+        if (!more) this.live.products = [];
+      } finally {
+        if (seq === this.liveSeq) this.live.loading = false;
+      }
+    },
+    // Products sold in options (e.g. cable colours): fetch the options.
+    async loadOptions(p) {
+      this.loadingOptions = p.id;
+      try {
+        const { product } = await api('GET', `/api/catalogue/${p.source}/products/${encodeURIComponent(p.defaultSku)}`);
+        const i = this.live.products.indexOf(p);
+        if (i >= 0) this.live.products.splice(i, 1, product);
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        this.loadingOptions = null;
+      }
+    },
+  },
+};
 
 // ---- Product picker -------------------------------------------------------------
 
 const ProductPicker = {
   components: { Modal, MoneyInput },
+  mixins: [liveSearchMixin],
   props: { sectionName: String, quote: Object },
   emits: ['add', 'close'],
   data() {
@@ -553,10 +668,18 @@ const ProductPicker = {
       return searchProducts(this.pool, this.q, this.category);
     },
     results() {
-      return this.matches.slice(0, this.limit);
+      return this.isLive ? this.live.products : this.matches.slice(0, this.limit);
     },
     searchHint() {
       return SEARCH_HINTS[this.tab] || `Search ${this.source ? this.source.label : ''} products`;
+    },
+    // How this quote works out our cost for Ubiquiti and Sonos products.
+    tradeDiscountText() {
+      const q = this.quote || {};
+      if (this.tab === 'ubiquiti') return Number(q.costDiscount) ? `our cost is the store price less ${q.costDiscount}%` : '';
+      if (this.tab !== 'sonos') return '';
+      const d = q.sonosCostDiscount;
+      return d === null || d === undefined || d === '' ? 'our cost isn’t known: set the Sonos discount under Pricing & terms, or type it on the line' : `our cost is the Sonos price less ${d}%`;
     },
     kits() {
       const q = this.q.trim().toLowerCase();
@@ -694,24 +817,37 @@ const ProductPicker = {
       </template>
 
       <template v-else-if="tab !== 'manual'">
-        <div class="picker-filters">
+        <div class="picker-filters" :class="{ 'search-only': isLive }">
           <input ref="search" class="search" type="search" v-model="q" :placeholder="searchHint">
-          <select v-model="category">
+          <select v-if="!isLive" v-model="category">
             <option value="">All {{ tab === 'crestron' ? 'ranges' : 'categories' }}</option>
             <option v-for="c in categories" :value="c">{{ c }}</option>
           </select>
         </div>
 
+        <p class="picker-meta" v-if="isLive && source.configured !== false">
+          Live from {{ source.label }}<template v-if="liveInfo && liveInfo.count"> ({{ liveInfo.count.toLocaleString('en-GB') }} products)</template> · price is the SRP and our cost is our trade price, both ex VAT<template v-if="live.products.length"> · {{ live.total.toLocaleString('en-GB') }} match{{ live.total === 1 ? '' : 'es' }}</template>
+        </p>
+
         <p class="picker-meta" v-if="source && source.kind === 'web'">
           <template v-if="cat.syncing === source.id || source.syncing">Updating from the {{ source.tabName }}…</template>
-          <template v-else-if="source.fetchedAt">Prices from the {{ source.tabName }}, ex VAT · updated {{ timeAgo(source.fetchedAt) }}<template v-if="tab === 'sonos'"> · our cost isn’t known, so add it on the line for the profit figure</template></template>
+          <template v-else-if="source.fetchedAt">Prices from the {{ source.tabName }}, ex VAT · updated {{ timeAgo(source.fetchedAt) }}<template v-if="tradeDiscountText"> · {{ tradeDiscountText }}</template></template>
           <template v-else-if="cat.loaded">No {{ source.label }} prices yet — refresh on the Products page.</template>
         </p>
         <p class="picker-meta" v-else-if="source && source.kind === 'import' && source.count">
           MSRP from the {{ source.label }} price list<template v-if="source.priceListDate"> dated {{ formatDay(source.priceListDate) }}</template>, ex VAT · our cost (dealer price) is filled in for the profit figure
         </p>
 
-        <div v-if="cat.loading && !cat.loaded" class="empty loading">Loading products…</div>
+        <div v-if="isLive && source.configured === false" class="empty">
+          {{ source.label }} isn’t connected yet. Add the API key from {{ source.label }} as <b>HABITECH_API_KEY</b> in Vercel → Settings → Environment Variables, then redeploy.
+        </div>
+        <div v-else-if="isLive && live.error" class="empty error-text">{{ live.error }}</div>
+        <div v-else-if="isLive && live.loading && !live.products.length" class="empty loading">Searching {{ source.label }}…</div>
+        <div v-else-if="isLive && !results.length" class="empty">
+          <template v-if="q.trim().length < 2">Type a product name, brand or part code to search {{ source.label }}<template v-if="liveInfo && liveInfo.count">’s {{ liveInfo.count.toLocaleString('en-GB') }} products</template>.</template>
+          <template v-else>Nothing at {{ source.label }} matches “{{ q }}”.</template>
+        </div>
+        <div v-else-if="cat.loading && !cat.loaded && !isLive" class="empty loading">Loading products…</div>
         <div v-else-if="!results.length" class="empty">
           <template v-if="tab === 'custom' && !pool.length">No saved products yet. Use <b>One-off item</b> and tick “Save to Our products”, or add them on the Products page.</template>
           <template v-else-if="source && source.kind === 'import' && !pool.length">No {{ source.label }} price list yet. Import it on the <a href="#/products" @click="$emit('close')">Products page</a>.</template>
@@ -719,30 +855,44 @@ const ProductPicker = {
           <template v-else>No products match “{{ q }}”.</template>
         </div>
 
-        <ul class="results" v-else>
+        <ul class="results" v-else :class="{ refreshing: isLive && live.loading }">
+          <li v-if="isLive && live.fuzzy" class="picker-meta fuzzy-note">No exact match, so these are the closest<template v-if="live.didYouMean">. Did you mean “{{ live.didYouMean }}”?</template></li>
           <li v-for="p in results" :key="p.id" class="result">
             <div class="thumb"><img v-if="p.image" :src="p.image" alt="" loading="lazy"></div>
             <div class="r-main">
               <div class="r-name">{{ p.name }}</div>
               <div class="r-sub">{{ p.manufacturer }} · {{ variantOf(p).sku || p.model }}<span v-if="p.subCategory"> · {{ p.category }} / {{ p.subCategory }}</span><span v-else-if="p.category && p.source !== 'custom'"> · {{ p.category }}</span></div>
-              <div class="r-desc">{{ p.description }}</div>
+              <div class="r-desc" v-if="p.description && p.description !== p.name">{{ p.description }}</div>
               <select v-if="p.variants.length > 1" class="variant" :value="variantOf(p).sku" @change="variants[p.id] = $event.target.value" aria-label="Option">
                 <option v-for="v in p.variants" :value="v.sku">{{ v.label || v.sku }} — {{ money(v.price) }}{{ v.status !== 'Available' ? ' (' + (STATUS_BADGE[v.status] || v.status) + ')' : '' }}</option>
               </select>
+              <div class="stock" v-if="stockText(variantOf(p))" :class="variantOf(p).stock">{{ stockText(variantOf(p)) }}</div>
             </div>
             <div class="r-price">
-              <div class="price">{{ money(variantOf(p).price) }}</div>
-              <div class="surcharge" v-if="variantOf(p).surcharge">+ {{ money(variantOf(p).surcharge) }} surcharge</div>
-              <div class="surcharge" v-if="(variantOf(p).cost ?? p.cost) != null && p.source !== 'custom'">our cost {{ money(variantOf(p).cost ?? p.cost) }}</div>
+              <template v-if="variantOf(p).status !== 'NoPrice'">
+                <div class="price">{{ money(variantOf(p).price) }}</div>
+                <div class="surcharge" v-if="variantOf(p).surcharge">+ {{ money(variantOf(p).surcharge) }} surcharge</div>
+                <div class="surcharge" v-if="(variantOf(p).cost ?? p.cost) != null && p.source !== 'custom'">our cost {{ money(variantOf(p).cost ?? p.cost) }}</div>
+                <div class="surcharge" v-if="variantOf(p).noSrp">no SRP, so priced at cost</div>
+              </template>
               <span class="badge warn" v-if="STATUS_BADGE[variantOf(p).status]">{{ STATUS_BADGE[variantOf(p).status] }}</span>
+              <span class="badge warn" v-if="p.status === 'Discontinued' && variantOf(p).status !== 'Discontinued'">Discontinued<template v-if="p.replacementSku"> · now {{ p.replacementSku }}</template></span>
             </div>
             <div class="r-add">
-              <input type="number" min="1" step="1" :value="qtyOf(p)" @input="qtys[p.id] = Math.max(1, parseInt($event.target.value) || 1)" aria-label="Quantity">
-              <button class="btn primary" @click="add(p)">Add</button>
+              <template v-if="p.hasOptions">
+                <button class="btn" @click="loadOptions(p)" :disabled="loadingOptions === p.id">{{ loadingOptions === p.id ? 'Loading…' : 'Choose option' }}</button>
+              </template>
+              <template v-else>
+                <input type="number" min="1" step="1" :value="qtyOf(p)" @input="qtys[p.id] = Math.max(1, parseInt($event.target.value) || 1)" aria-label="Quantity">
+                <button class="btn primary" @click="add(p)" :disabled="variantOf(p).status === 'NoPrice'" :title="variantOf(p).status === 'NoPrice' ? 'Habitech has no trade price for this on our account. Email Habitech to add pricing for this brand.' : ''">Add</button>
+              </template>
             </div>
           </li>
-          <li v-if="matches.length > results.length" class="more">
+          <li v-if="!isLive && matches.length > results.length" class="more">
             <button class="btn ghost" @click="limit += 40">Show more ({{ matches.length - results.length }} more)</button>
+          </li>
+          <li v-if="isLive && live.hasMore" class="more">
+            <button class="btn ghost" @click="runLiveSearch(true)" :disabled="live.loading">{{ live.loading ? 'Loading…' : 'Show more (' + (live.total - results.length).toLocaleString('en-GB') + ' more)' }}</button>
           </li>
         </ul>
       </template>
@@ -939,6 +1089,7 @@ const QuoteEditor = {
       savingVersion: false,
       kitDraft: null,
       hideProfit: storageGet('mesh.hideProfit') === '1',
+      livePrices: {}, // today's Habitech price, cost and stock, keyed like priceKey()
     };
   },
   computed: {
@@ -992,7 +1143,14 @@ const QuoteEditor = {
     },
     // Current store prices by SKU, to spot lines whose price has changed.
     priceIndex() {
-      return storePriceIndex();
+      return { ...storePriceIndex(), ...this.livePrices };
+    },
+    // The quote's lines from live catalogues (Habitech), whose prices we ask for.
+    liveKeys() {
+      if (!this.quote) return '';
+      const keys = new Set();
+      for (const s of this.quote.sections) for (const i of s.items) if (i.kind !== 'labour' && i.sku && isLiveSource(i.source)) keys.add(priceKey(i));
+      return [...keys].sort().join('\n');
     },
     changedPrices() {
       if (!this.quote || !state.catalogue.loaded) return [];
@@ -1035,6 +1193,10 @@ const QuoteEditor = {
         this.loadActivity();
       }
     },
+    liveKeys() {
+      clearTimeout(this.liveTimer);
+      this.liveTimer = setTimeout(() => this.loadLivePrices(), 400);
+    },
   },
   async mounted() {
     loadCatalogue();
@@ -1059,6 +1221,7 @@ const QuoteEditor = {
   beforeUnmount() {
     window.removeEventListener('beforeunload', this.onUnload);
     document.removeEventListener('visibilitychange', this.onVisible);
+    clearTimeout(this.liveTimer);
     if (this.saveState === 'unsaved') this.saveNow();
   },
   methods: {
@@ -1071,9 +1234,12 @@ const QuoteEditor = {
       quote.scope ||= [];
       quote.display ||= {};
       quote.display.layout ||= 'detailed';
+      quote.display.labourPlacement ||= state.settings?.display?.labourPlacement || 'area';
       quote.client ||= {};
       quote.discount ||= { type: 'none', percent: null, amount: null, label: '' };
       quote.costDiscount ??= 0;
+      // A quote without its own Sonos discount picks up the one in Settings.
+      if (quote.sonosCostDiscount == null || quote.sonosCostDiscount === '') quote.sonosCostDiscount = state.settings?.sonosCostDiscount ?? null;
       for (const s of quote.sections) for (const i of s.items) if (i.kind !== 'labour') i.labour ||= [];
       this.skipWatch = true;
       this.quote = quote;
@@ -1310,7 +1476,7 @@ const QuoteEditor = {
     storePriceChange(item) {
       if (item.kind === 'labour' || !C.isCatalogueItem(item)) return null;
       const v = this.priceIndex[priceKey(item)];
-      if (!v) return null;
+      if (!v || v.status === 'NoPrice') return null;
       if (v.price === item.basePrice && (v.surcharge || 0) === (item.surcharge || 0)) return null;
       return v;
     },
@@ -1325,6 +1491,35 @@ const QuoteEditor = {
       const n = this.changedPrices.length;
       for (const { item } of this.changedPrices) this.applyStorePrice(item);
       toast(`Updated ${n} line${n === 1 ? '' : 's'} to current catalogue prices`);
+    },
+    // Ask Habitech for today's price, cost and stock of the quote's Habitech
+    // lines (each SKU once per visit). A failure just leaves the lines as they are.
+    async loadLivePrices() {
+      this.liveAsked ||= new Set();
+      const bySource = {};
+      for (const key of this.liveKeys.split('\n').filter(Boolean)) {
+        if (this.liveAsked.has(key)) continue;
+        this.liveAsked.add(key);
+        const [source, ...rest] = key.split('|');
+        (bySource[source] ||= []).push(rest.join('|'));
+      }
+      for (const [source, skus] of Object.entries(bySource)) {
+        try {
+          const { prices } = await api('POST', `/api/catalogue/${source}/prices`, { skus });
+          const next = { ...this.livePrices };
+          for (const [sku, v] of Object.entries(prices)) if (v.status !== 'NoPrice') next[`${source}|${sku}`] = v;
+          this.livePrices = next;
+        } catch (err) {
+          for (const sku of skus) this.liveAsked.delete(`${source}|${sku}`); // try again next time
+          console.warn(`Could not check ${source} prices: ${err.message}`);
+        }
+      }
+    },
+    liveStock(item) {
+      return isLiveSource(item.source) ? stockText(this.livePrices[priceKey(item)]) : '';
+    },
+    liveStockLevel(item) {
+      return this.livePrices[priceKey(item)]?.stock || '';
     },
 
     // Proposal text
@@ -1455,6 +1650,7 @@ const QuoteEditor = {
                     <div class="l-sub">
                       <span class="src" :class="item.source">{{ item.manufacturer }}</span>
                       <span>{{ item.sku || item.model }}</span>
+                      <span class="stock" v-if="liveStock(item)" :class="liveStockLevel(item)">{{ liveStock(item) }}</span>
                       <a v-if="item.url" :href="item.url" target="_blank" rel="noopener">store page ↗</a>
                       <button class="link sm" @click="descOpen[item.id] = !descOpen[item.id]">{{ descOpen[item.id] ? 'Hide description' : 'Description' }}</button>
                       <button class="link sm" v-if="!item.discount" @click="discOpen[item.id] = !discOpen[item.id]">Discount</button>
@@ -1471,10 +1667,12 @@ const QuoteEditor = {
                       <span class="sm" :class="lineMargin(item) < 0 ? 'error-text' : 'muted'" v-if="lineMargin(item) !== null">{{ pct(lineMargin(item)) }} margin</span>
                       <span class="muted sm" v-if="item.costPrice == null && item.source === 'ubiquiti'">(store price{{ quote.costDiscount ? ' less ' + quote.costDiscount + '%' : '' }})</span>
                       <span class="muted sm" v-else-if="item.source === 'crestron' && item.costPrice != null">(Crestron dealer price)</span>
-                      <span class="muted sm" v-else-if="item.costPrice == null && item.source === 'sonos'">(type what we pay)</span>
+                      <span class="muted sm" v-else-if="item.source === 'habitech' && item.costPrice != null">(Habitech trade price)</span>
+                      <span class="muted sm" v-else-if="item.costPrice == null && item.source === 'sonos' && quote.sonosCostDiscount != null && quote.sonosCostDiscount !== ''">(Sonos price less {{ quote.sonosCostDiscount }}%)</span>
+                      <span class="muted sm" v-else-if="item.costPrice == null && item.source === 'sonos'">(type what we pay, or set the Sonos discount under Pricing &amp; terms)</span>
                     </div>
                     <div class="price-change" v-if="storePriceChange(item)">
-                      Store price now {{ money(storePriceChange(item).price) }}<template v-if="storePriceChange(item).surcharge"> + {{ money(storePriceChange(item).surcharge) }} surcharge</template>
+                      {{ item.source === 'habitech' ? 'Habitech SRP' : 'Store price' }} now {{ money(storePriceChange(item).price) }}<template v-if="storePriceChange(item).surcharge"> + {{ money(storePriceChange(item).surcharge) }} surcharge</template><template v-if="storePriceChange(item).cost != null && storePriceChange(item).cost !== item.costPrice && item.source === 'habitech'"> (our cost {{ money(storePriceChange(item).cost) }})</template>
                       <button class="link sm" @click="applyStorePrice(item)">Update</button>
                     </div>
                   </div>
@@ -1637,6 +1835,10 @@ const QuoteEditor = {
                 <input type="number" step="0.5" min="0" max="100" v-model.number="quote.costDiscount">
                 <small class="muted">Internal only, for the profit figure. If you buy 15% below the store price, enter 15.</small>
               </label>
+              <label>Our trade discount off Sonos prices (%)
+                <input type="number" step="0.5" min="0" max="100" v-model.number="quote.sonosCostDiscount" placeholder="Not set">
+                <small class="muted">Internal only, for the profit figure. Off the Sonos UK price (ex VAT). Leave empty to type each Sonos cost yourself.</small>
+              </label>
               <label>VAT rate (%)<input type="number" step="0.5" min="0" v-model.number="quote.vatRate"></label>
               <label class="check span-2"><input type="checkbox" v-model="quote.includeSurcharges">
                 <span>Include Ubiquiti surcharges in prices <small class="muted">— some products carry a surcharge (e.g. “Memory”) that the store adds at checkout on top of the listed price.</small></span>
@@ -1661,8 +1863,14 @@ const QuoteEditor = {
               <label class="check"><input type="checkbox" v-model="quote.display.showImages"> Product images</label>
               <label class="check"><input type="checkbox" v-model="quote.display.showItemPrices"> Price of each item</label>
               <label class="check"><input type="checkbox" v-model="quote.display.showSku"> Manufacturer and model numbers</label>
-              <label class="check"><input type="checkbox" v-model="quote.display.showLabourDetail"> Labour under each item <small class="muted">(otherwise labour is shown as a summary)</small></label>
+              <label class="check"><input type="checkbox" v-model="quote.display.showLabourDetail"> Labour under each item <small class="muted">(with hours and rates)</small></label>
             </div>
+            <label class="inline-select">Labour
+              <select v-model="quote.display.labourPlacement">
+                <option value="area">At the bottom of each area</option>
+                <option value="end">In one section after the areas</option>
+              </select>
+            </label>
             <label class="check cover-option"><input type="checkbox" v-model="quote.display.coverPage"> Separate cover page <small class="muted">(adds a page; good for bigger proposals)</small></label>
           </section>
 
@@ -1809,6 +2017,7 @@ const QuoteEditor = {
 
 const ProductsPage = {
   components: { MoneyInput, Modal },
+  mixins: [liveSearchMixin],
   data() {
     return { tab: 'ubiquiti', q: '', category: '', limit: 60, editing: null, kitEditing: null };
   },
@@ -1833,6 +2042,9 @@ const ProductsPage = {
     matches() {
       return searchProducts(this.pool, this.q, this.category);
     },
+    rows() {
+      return this.isLive ? this.live.products : this.matches.slice(0, this.limit);
+    },
     kits: () => state.kits.list,
     kitsLoaded: () => state.kits.loaded,
     // Price kits with the default rates from Settings.
@@ -1847,6 +2059,7 @@ const ProductsPage = {
   mounted() {
     loadCatalogue();
     loadKits();
+    for (const s of catalogueSources()) if (s.kind === 'live') loadLiveStatus(s.id);
   },
   methods: {
     ...sharedMethods,
@@ -1861,8 +2074,29 @@ const ProductsPage = {
     onImportFile(e) {
       importCatalogue(this.tab, e.target.files && e.target.files[0]);
     },
+    // Our trade discount off Ubiquiti or Sonos prices, kept in Settings.
+    discountField: (id) => ({ ubiquiti: 'costDiscount', sonos: 'sonosCostDiscount' })[id] || null,
+    discountValue(id) {
+      const v = state.settings?.[this.discountField(id)];
+      return v === null || v === undefined || v === '' ? '' : v;
+    },
+    async saveDiscount(id, raw) {
+      const field = this.discountField(id);
+      const text = String(raw ?? '').trim();
+      const n = Number(text);
+      if (text !== '' && !Number.isFinite(n)) return toast('Enter a percentage, e.g. 15', 'error');
+      const value = text === '' ? (id === 'ubiquiti' ? 0 : null) : Math.min(100, Math.max(0, n));
+      const label = id === 'sonos' ? 'Sonos' : 'Ubiquiti';
+      try {
+        state.settings = await api('PUT', '/api/settings', { [field]: value });
+        toast(value === null ? `${label} trade discount cleared` : `${label} trade discount saved: ${value}%`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
     countOf(id) {
-      return this.cat.products.filter((p) => p.source === id).length;
+      if (isLiveSource(id)) return liveStatus[id]?.count ?? null;
+      return this.cat.loaded ? this.cat.products.filter((p) => p.source === id).length : null;
     },
     kitTotal(kit) {
       const prices = storePriceIndex();
@@ -1935,7 +2169,7 @@ const ProductsPage = {
     </div>
 
     <nav class="tabs" v-tab-ink>
-      <button v-for="s in catalogues" :key="s.id" :class="{ active: tab === s.id }" @click="tab = s.id">{{ s.tabName }} <span class="count" v-if="cat.loaded">{{ countOf(s.id).toLocaleString('en-GB') }}</span></button>
+      <button v-for="s in catalogues" :key="s.id" :class="{ active: tab === s.id }" @click="tab = s.id">{{ s.tabName }} <span class="count" v-if="countOf(s.id) != null">{{ countOf(s.id).toLocaleString('en-GB') }}</span></button>
       <button :class="{ active: tab === 'custom' }" @click="tab = 'custom'">Our products <span class="count">{{ cat.products.filter(p => p.source === 'custom').length }}</span></button>
       <button :class="{ active: tab === 'kits' }" @click="tab = 'kits'">Kits <span class="count" v-if="kitsLoaded">{{ kits.length }}</span></button>
     </nav>
@@ -1974,9 +2208,15 @@ const ProductsPage = {
         <div class="muted sm" v-if="busy">Updating from the {{ source.label }} website{{ source.id === 'ubiquiti' ? ' — this takes about 10 seconds' : '' }}…</div>
         <div class="muted sm" v-else-if="source.fetchedAt">
           Prices last updated {{ formatDateTime(source.fetchedAt) }} ({{ timeAgo(source.fetchedAt) }}). Refreshes automatically once a day. Prices exclude VAT<template v-if="source.id === 'sonos'"> (worked out from the shop’s prices, which include it)</template>.
-          <template v-if="source.id === 'sonos'"> The shop doesn’t show what we pay, so add our cost on each quote line for the profit figure.</template>
+          <template v-if="source.id === 'sonos' && discountValue('sonos') === ''"> The shop doesn’t show what we pay, so set our trade discount below (or type our cost on each quote line) for the profit figure.</template>
         </div>
         <div class="error-text sm" v-if="source.error">Last refresh had a problem: {{ source.error }}</div>
+        <div class="trade-discount" v-if="discountField(source.id)">
+          <label>Our trade discount
+            <span class="pct-input"><input type="number" min="0" max="100" step="0.5" :value="discountValue(source.id)" :placeholder="source.id === 'sonos' ? 'Not set' : '0'" @change="saveDiscount(source.id, $event.target.value)" :aria-label="'Our trade discount off ' + source.label + ' prices, percent'"><span>% off {{ source.id === 'sonos' ? 'Sonos UK prices' : 'store prices' }}</span></span>
+          </label>
+          <span class="muted sm trade-discount-note">Works out our cost for the profit figure (only your team sees it). New quotes use it; each quote can change it under <b>Pricing &amp; terms</b>.</span>
+        </div>
       </div>
       <button class="btn" @click="sync" :disabled="Boolean(cat.syncing) || busy">{{ busy ? 'Updating…' : 'Refresh prices now' }}</button>
     </div>
@@ -2001,35 +2241,63 @@ const ProductsPage = {
       <input type="file" ref="importFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="onImportFile" hidden>
     </div>
 
-    <template v-if="tab !== 'kits'">
-    <div class="toolbar-row">
-      <input class="search" type="search" v-model="q" placeholder="Search by name, model or SKU">
-      <select v-model="category"><option value="">All {{ tab === 'crestron' ? 'ranges' : 'categories' }}</option><option v-for="c in categories" :value="c">{{ c }}</option></select>
-      <span class="muted sm">{{ matches.length.toLocaleString('en-GB') }} product{{ matches.length === 1 ? '' : 's' }}</span>
+    <!-- Searched live through the supplier's API (Habitech) -->
+    <div class="card source-card" v-if="source && source.kind === 'live'">
+      <div>
+        <template v-if="source.configured === false || (liveInfo && liveInfo.configured === false)">
+          <div class="strong">{{ source.label }} isn’t connected yet</div>
+          <div class="muted sm">Add the API key from {{ source.label }} as <b>HABITECH_API_KEY</b> in Vercel → Settings → Environment Variables (tick <b>Sensitive</b>), then redeploy. On your own computer, it goes in the <b>.env</b> file in the app’s folder.</div>
+        </template>
+        <template v-else>
+          <div class="strong"><template v-if="liveInfo && liveInfo.count">{{ liveInfo.count.toLocaleString('en-GB') }} products</template><template v-else>Products</template> from our {{ source.label }} trade account</div>
+          <div class="muted sm">
+            Searched live as you type, so prices and stock are always {{ source.label }}’s latest<template v-if="liveInfo && liveInfo.syncedAt"> (last updated by {{ source.label }} {{ timeAgo(liveInfo.syncedAt) }})</template>.
+            The price is {{ source.label }}’s SRP and our cost is our trade price, both ex VAT. Quotes check their {{ source.label }} lines each time you open them.
+          </div>
+          <div class="error-text sm" v-if="liveInfo && liveInfo.error">{{ liveInfo.error }}</div>
+        </template>
+      </div>
     </div>
 
-    <div class="card table-card">
-      <div class="empty loading" v-if="cat.loading && !cat.loaded">Loading…</div>
+    <template v-if="tab !== 'kits'">
+    <div class="toolbar-row">
+      <input class="search" type="search" v-model="q" :placeholder="isLive ? 'Search ' + source.label + ' by name, brand or part code' : 'Search by name, model or SKU'">
+      <select v-if="!isLive" v-model="category"><option value="">All {{ tab === 'crestron' ? 'ranges' : 'categories' }}</option><option v-for="c in categories" :value="c">{{ c }}</option></select>
+      <span class="muted sm" v-if="!isLive">{{ matches.length.toLocaleString('en-GB') }} product{{ matches.length === 1 ? '' : 's' }}</span>
+      <span class="muted sm" v-else-if="live.products.length">{{ live.total.toLocaleString('en-GB') }} match{{ live.total === 1 ? '' : 'es' }}</span>
+    </div>
+
+    <div class="card table-card" :class="{ refreshing: isLive && live.loading && live.products.length }">
+      <template v-if="isLive">
+        <div class="empty" v-if="source.configured === false">Connect {{ source.label }} (see above) to search its products here.</div>
+        <div class="empty error-text" v-else-if="live.error">{{ live.error }}</div>
+        <div class="empty loading" v-else-if="live.loading && !live.products.length">Searching {{ source.label }}…</div>
+        <div class="empty" v-else-if="!live.products.length">{{ q.trim().length < 2 ? 'Type a product name, brand or part code to search ' + source.label + '.' : 'Nothing at ' + source.label + ' matches “' + q + '”.' }}</div>
+      </template>
+      <div class="empty loading" v-else-if="cat.loading && !cat.loaded">Loading…</div>
       <div class="empty" v-else-if="!matches.length">
         <template v-if="tab === 'custom' && !pool.length">No products yet. Add products from other manufacturers here so you can reuse them on quotes.</template>
         <template v-else-if="source && source.kind === 'import' && !pool.length">Import the price list above to see the products here.</template>
         <template v-else-if="source && !pool.length">No products yet — click Refresh prices now.</template>
         <template v-else>No products match.</template>
       </div>
-      <table class="list products" v-else>
+      <table class="list products" v-if="rows.length">
         <thead><tr><th></th><th>Product</th><th>{{ tab === 'crestron' ? 'Range' : 'Category' }}</th><th class="num">Price ex VAT</th><th></th></tr></thead>
         <tbody>
-          <tr v-for="p in matches.slice(0, limit)" :key="p.id">
+          <tr v-for="p in rows" :key="p.id">
             <td class="thumb-cell"><div class="thumb"><img v-if="p.image" :src="p.image" alt="" loading="lazy"></div></td>
             <td>
               <div class="strong">{{ p.name }}</div>
-              <div class="muted sm">{{ p.manufacturer }} · {{ p.model }}<span v-if="p.variants.length > 1"> · {{ p.variants.length }} options</span></div>
+              <div class="muted sm">{{ p.manufacturer }} · {{ isLive ? p.defaultSku : p.model }}<span v-if="isLive && p.model !== p.defaultSku"> · part {{ p.model }}</span><span v-if="p.variants.length > 1"> · {{ p.variants.length }} options</span><span v-if="p.hasOptions"> · sold in options</span></div>
+              <div class="stock sm" v-if="stockText(p.variants[0])" :class="p.variants[0].stock">{{ stockText(p.variants[0]) }}</div>
             </td>
             <td class="muted">{{ p.category }}<span v-if="p.subCategory"> / {{ p.subCategory }}</span></td>
             <td class="num">
-              <span class="strong">{{ p.variants.length > 1 ? 'from ' : '' }}{{ money(Math.min(...p.variants.map(v => v.price))) }}</span>
-              <div class="muted sm" v-if="p.variants[0].surcharge">+ surcharge</div>
-              <div class="muted sm" v-if="p.cost != null && p.source !== 'custom'">our cost {{ money(p.cost) }}</div>
+              <template v-if="p.status !== 'NoPrice'">
+                <span class="strong">{{ p.variants.length > 1 ? 'from ' : '' }}{{ money(Math.min(...p.variants.map(v => v.price))) }}</span>
+                <div class="muted sm" v-if="p.variants[0].surcharge">+ surcharge</div>
+                <div class="muted sm" v-if="p.cost != null && p.source !== 'custom'">our cost {{ money(p.cost) }}</div>
+              </template>
               <span class="badge warn" v-if="statusBadge(p.status)">{{ statusBadge(p.status) }}</span>
             </td>
             <td class="actions">
@@ -2040,7 +2308,8 @@ const ProductsPage = {
               </template>
             </td>
           </tr>
-          <tr v-if="matches.length > limit"><td colspan="5" class="more"><button class="btn ghost" @click="limit += 60">Show more</button></td></tr>
+          <tr v-if="!isLive && matches.length > limit"><td colspan="5" class="more"><button class="btn ghost" @click="limit += 60">Show more</button></td></tr>
+          <tr v-if="isLive && live.hasMore"><td colspan="5" class="more"><button class="btn ghost" @click="runLiveSearch(true)" :disabled="live.loading">{{ live.loading ? 'Loading…' : 'Show more' }}</button></td></tr>
         </tbody>
       </table>
     </div>
@@ -2221,6 +2490,7 @@ const SettingsPage = {
         <label>VAT rate (%)<input type="number" min="0" step="0.5" v-model.number="s.vatRate"></label>
         <label>Markup on Ubiquiti store prices (%)<input type="number" step="0.5" v-model.number="s.markup"></label>
         <label>Our trade discount off Ubiquiti store prices (%)<input type="number" step="0.5" min="0" max="100" v-model.number="s.costDiscount"><small class="muted">Internal, for the profit figure</small></label>
+        <label>Our trade discount off Sonos prices (%)<input type="number" step="0.5" min="0" max="100" v-model.number="s.sonosCostDiscount" placeholder="Not set"><small class="muted">Internal, for the profit figure. Off the Sonos UK price ex VAT</small></label>
         <label class="check span-2"><input type="checkbox" v-model="s.includeSurcharges"> Include Ubiquiti surcharges in prices</label>
       </div>
       <h3 class="sub-title">What proposals show</h3>
@@ -2241,6 +2511,12 @@ const SettingsPage = {
         <label class="check"><input type="checkbox" v-model="s.display.showLabourDetail"> Labour under each item</label>
         <label class="check"><input type="checkbox" v-model="s.display.coverPage"> Separate cover page</label>
       </div>
+      <label class="inline-select">Labour
+        <select v-model="s.display.labourPlacement">
+          <option value="area">At the bottom of each area</option>
+          <option value="end">In one section after the areas</option>
+        </select>
+      </label>
     </section>
 
     <section class="card">

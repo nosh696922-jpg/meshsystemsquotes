@@ -49,19 +49,29 @@
     return Math.round(list * (1 + markup / 100));
   }
 
+  // Our trade discount off a catalogue's own prices (%), or null if we haven't
+  // set one: Ubiquiti store prices (quote.costDiscount, 0 when unset) and Sonos
+  // UK prices (quote.sonosCostDiscount, unknown until set).
+  function tradeDiscount(item, quote) {
+    if (item.source === 'ubiquiti') return pct(quote.costDiscount);
+    if (item.source === 'sonos' && has(quote.sonosCostDiscount)) return pct(quote.sonosCostDiscount);
+    return null;
+  }
+
   // What one unit costs us (pence). Internal only, for the profit figure.
-  // A cost on the line wins (typed in, or a Crestron dealer price). Ubiquiti
-  // items cost the store price less our trade discount. Anything else without
-  // a cost counts at its price (and the profit panel says so).
+  // A cost on the line wins (typed in, or a Crestron/Habitech trade price).
+  // Ubiquiti and Sonos items cost their price less our trade discount. Anything
+  // else without a cost counts at its price (and the profit panel says so).
   function unitCost(item, quote) {
     if (has(item.costPrice)) return Math.round(num(item.costPrice));
     const list = listPrice(item, quote);
-    if (usesStoreSettings(item)) return Math.round(list * (1 - pct(quote.costDiscount) / 100));
+    const discount = tradeDiscount(item, quote || {});
+    if (discount !== null) return Math.round(list * (1 - discount / 100));
     return list;
   }
 
-  function costKnown(item) {
-    return has(item.costPrice) || usesStoreSettings(item);
+  function costKnown(item, quote) {
+    return has(item.costPrice) || tradeDiscount(item, quote || {}) !== null;
   }
 
   function labourType(quote, typeId) {
@@ -152,7 +162,7 @@
         lineDiscounts += t.discount;
         if (item.kind !== 'labour') {
           equipmentCost += unitCost(item, quote) * num(item.qty);
-          if (!costKnown(item) && num(item.qty) > 0) missingCost += 1;
+          if (!costKnown(item, quote) && num(item.qty) > 0) missingCost += 1;
         }
         for (const l of t.labour) {
           if (!labourByType[l.type]) labourByType[l.type] = { id: l.type, name: labourName(quote, l.type), rate: labourRate(quote, l.type), hours: 0, cost: 0 };
@@ -233,6 +243,7 @@
     unitPrice,
     unitCost,
     costKnown,
+    tradeDiscount,
     isCatalogueItem,
     usesStoreSettings,
     labourRate,

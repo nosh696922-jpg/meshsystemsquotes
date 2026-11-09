@@ -652,6 +652,8 @@ table.rates th small { text-transform: none; letter-spacing: 0; font-weight: 400
 .choice small { display: block; color: var(--muted); }
 .checks.dim { opacity: 0.55; }
 .cover-option { margin-top: 12px; }
+.inline-select { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 14px; color: var(--text); }
+.inline-select select { width: auto; max-width: 100%; }
 
 /* Summary sidebar */
 .summary h3, .profit-head h3 { font-size: 16px; }
@@ -728,6 +730,19 @@ table.rates th small { text-transform: none; letter-spacing: 0; font-weight: 400
 .r-add input { width: 56px; text-align: center; padding: 6px 4px; }
 .results .more { text-align: center; padding: 14px; }
 .manual { margin-top: 4px; }
+
+/* Live catalogues (Habitech): stock levels and search-as-you-type */
+.stock { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.stock::before { content: ''; width: 7px; height: 7px; border-radius: 2px; background: currentColor; flex: none; }
+.stock.in_stock { color: var(--green); }
+.stock.low_stock { color: var(--amber); }
+.stock.out_of_stock { color: var(--red); }
+.r-main .stock { margin-top: 5px; }
+td .stock { margin-top: 3px; }
+.l-sub .stock { font-size: 12px; }
+.r-price .badge { margin-top: 4px; }
+.results.refreshing, .table-card.refreshing { opacity: 0.6; transition: opacity 0.2s ease; }
+.results .fuzzy-note { list-style: none; margin: 4px 4px 6px; }
 .kit-thumb { background: var(--blue-soft); display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; padding: 16px; align-items: stretch; justify-items: stretch; align-content: stretch; justify-content: stretch; }
 .kit-thumb span { background: var(--blue); border-radius: 1px; }
 .kit-thumb span:first-child { grid-column: 1 / -1; }
@@ -791,6 +806,11 @@ table.rates th small { text-transform: none; letter-spacing: 0; font-weight: 400
 /* ---- Products / settings ----------------------------------------------------- */
 
 .source-card { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.trade-discount { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.trade-discount label { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; color: var(--ink); }
+.pct-input { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+.pct-input input { width: 84px; text-align: right; padding: 6px 10px; }
+.trade-discount-note { flex-basis: 100%; }
 .team-row { display: grid; grid-template-columns: 1.1fr 1fr 1.3fr 1fr 30px; gap: 8px; margin-bottom: 8px; align-items: center; }
 .rate-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .rate-row > input { flex: 1; min-width: 0; }

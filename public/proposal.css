@@ -230,6 +230,16 @@ table.items tr.sub-labour td { padding-top: 0.5mm; padding-bottom: 1.5mm; font-s
 table.items tr.sub-labour .desc { padding-left: 5mm; position: relative; }
 table.items tr.sub-labour .desc::before { content: ''; position: absolute; left: 2mm; top: 2.2mm; width: 1.4mm; height: 1.4mm; background: var(--blue-wash-line); }
 table.items tr.sub-labour + tr.item td, table.items tr.sub-labour:last-child td { border-top: 1px solid var(--line); }
+/* Each area's labour, gathered by service, under its products */
+table.items tr.area-labour-head td {
+  padding: 3.5mm 2mm 1.2mm; border-bottom: 1px solid var(--line-strong);
+  font-size: 7.5pt; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+}
+table.items tr.area-labour-head { break-after: avoid; }
+table.items tr.area-labour td { padding-top: 1.6mm; padding-bottom: 1.6mm; }
+table.items tr.area-labour .name { position: relative; padding-left: 4mm; }
+table.items tr.area-labour .name::before { content: ''; position: absolute; left: 0.3mm; top: 0.55em; width: 1.5mm; height: 1.5mm; background: var(--blue); }
+table.items tr.area-labour .text { padding-left: 4mm; }
 table.items tfoot td { padding: 3mm 0 0; border: none; }
 .area-total { display: flex; justify-content: flex-end; gap: 7mm; font-size: 9pt; color: var(--muted); }
 .area-total b { color: var(--ink); font-weight: 600; margin-left: 1.5mm; }
@@ -389,4 +399,9 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   table.items tr.item:not(:has(td.num)) td.qty::after { content: ''; }
   table.items tfoot tr, table.items tfoot td { display: block; }
   .area-total { flex-wrap: wrap; justify-content: flex-start; gap: 4px 16px; }
+  table.items tr.area-labour-head { display: block; padding: 14px 0 6px; border-bottom: 1px solid var(--line-strong); }
+  table.items tr.area-labour-head td { padding: 0; }
+  table.items tr.area-labour { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  table.items tr.area-labour td.desc { margin-bottom: 0; }
+  table.items tr.area-labour td.qty, table.items tr.area-labour td.num:not(.total) { display: none; }
 }
