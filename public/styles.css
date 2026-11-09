@@ -334,6 +334,7 @@ small { font-size: 12px; }
 .sub-title { font-size: 14.5px; margin: 18px 0 10px; }
 .table-card { padding: 0; overflow-x: auto; }
 .account-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.exe-download { margin-top: 8px; }
 
 .notice { background: var(--blue-soft); color: var(--notice-text); border: 1px solid var(--blue-line); border-radius: 12px; padding: 11px 16px; margin-bottom: 16px; font-size: 13.5px; }
 .notice.slim { margin: 14px 0 0; }

@@ -6,3 +6,8 @@ data/
 !.env.example
 .vercel/
 .claude/
+
+# Windows program: downloaded kit and build output (the finished .exe is
+# copied to public/download/)
+desktop/.build/
+desktop/dist/

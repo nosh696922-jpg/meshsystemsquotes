@@ -57,6 +57,55 @@ count).
 - Your password is only ever stored in Vercel’s environment settings, never in
   this repository.
 
+### Using it like a program (desktop app)
+
+The website can be installed as an app, with its own window and icon in the
+Start menu and taskbar (the home screen on a phone). It's the same website
+underneath, so the quotes are the same everywhere and it updates itself when a
+new version goes live. Nothing needs downloading.
+
+- **Edge or Chrome on a computer:** open the website, go to **Settings → Use it
+  like a program → Install app**. (Or use the install icon at the right of the
+  address bar.) Right-click the icon in the taskbar to pin it.
+- **iPhone/iPad:** Safari → Share → **Add to Home Screen**.
+- **Android:** Chrome → ⋮ → **Add to Home screen**.
+
+To remove it, open the app, click ⋯ at the top, then **Uninstall**, or use
+Windows Settings → Apps.
+
+### The Windows program (MeshQuotes.exe)
+
+There's also a real Windows program: **Settings → Use it like a program →
+download the Windows program**, or `/download/MeshQuotes.exe` on the website.
+It's about 1 MB, needs no installing (save it anywhere, double-click it), and
+opens the live website in its own window with a dark title bar and the Mesh
+icon. Like the installed app, it always shows the latest version and the same
+quotes. Right-click its taskbar icon to pin it.
+
+- It uses Microsoft Edge WebView2, which is part of Windows 10 and 11. On a PC
+  without it, the program offers Microsoft's free download.
+- Links to other websites (store pages) open in your normal browser. Proposal
+  previews and PDFs open in a second Mesh Quotes window.
+- It isn't signed with a code-signing certificate, so Edge may say it "isn't
+  commonly downloaded" (choose **Keep**) and Windows may say it "protected your
+  PC" (choose **More info → Run anyway**). A certificate would remove those
+  warnings.
+- Its sign-in and window position are kept in `%LOCALAPPDATA%\Mesh Quotes`.
+- The menu from the icon at the top left has **About Mesh Quotes**.
+
+To rebuild it after changing `desktop/MeshQuotes.cs` (only needed if the
+program itself changes, not the website):
+
+```
+powershell -ExecutionPolicy Bypass -File desktop\build.ps1
+```
+
+This uses the C# compiler that comes with Windows, downloads Microsoft's
+WebView2 kit from nuget.org the first time (checked against a fingerprint), and
+copies the new `MeshQuotes.exe` to `public\download\`. For testing,
+`MeshQuotes.exe --url=http://localhost:3000` opens your own copy instead of the
+website.
+
 ## Running it on your own computer
 
 You need [Node.js](https://nodejs.org) 18 or newer. There is nothing else to install.
@@ -160,6 +209,8 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
 | `public/app.js`, `public/styles.css` | The quoting app |
 | `public/shared/calc.js` | Pricing maths, shared by app and proposal |
 | `public/shared/mesh-nodes.js` | The moving nodes at the top of each page and on the sign-in page |
+| `public/manifest.webmanifest`, `public/img/app-icon-*.png` | Lets the site be installed as an app (name, icon, own window) |
+| `desktop/` | The Windows program: `MeshQuotes.cs`, its icon, and `build.ps1`, which builds `public/download/MeshQuotes.exe` |
 
 ## Adding another manufacturer later
 
@@ -195,6 +246,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v4` | More catalogues: Sonos (read daily from the Sonos UK shop) and Crestron (import the dealer price list .xlsx; MSRP = price, dealer = our cost). Markup and trade discount now apply to Ubiquiti only. Rolling back to `v3.3` hides Sonos and Crestron products, but quote lines already added keep their prices |
 | `v4.1` | Habitech catalogue (search Habitech live with our trade prices and stock; needs `HABITECH_API_KEY` in Vercel), each area’s labour shown at the bottom of that area in proposals, and a Sonos trade discount alongside the Ubiquiti one, both at the top of their Products tabs. Rolling back to `v4` hides Habitech products and puts labour back in one section, but quote lines already added keep their prices |
 | `v4.2` | The Habitech tab lists every product (a copy of the whole list, refreshed nightly) with a brand filter and instant search, falling back to searching Habitech when nothing matches. Today’s price is checked when you add a Habitech product. Rolling back to `v4.1` goes back to search-only (the saved copy is simply ignored) |
+| `v4.3` | Use it like a program: the website can be installed as an app (own window and icon, from **Settings → Use it like a program**), and a Windows program, `MeshQuotes.exe`, can be downloaded from the same place. Rolling back to `v4.2` removes the install option and the download, but copies of the program people already have keep working |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s

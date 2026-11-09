@@ -250,6 +250,43 @@ const state = reactive({
   toasts: [],
 });
 
+// ---- Installing as an app ----------------------------------------------------
+// Edge and Chrome can install the site as a program with its own window and
+// icon. The browser fires beforeinstallprompt when it's ready to offer that.
+// The Windows program (desktop/MeshQuotes.cs) adds MeshQuotesApp to its user agent.
+const IN_WINDOWS_APP = /MeshQuotesApp\//.test(navigator.userAgent);
+const installApp = reactive({
+  prompt: null,
+  installed: IN_WINDOWS_APP || Boolean(window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true,
+});
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); // offer it from Settings instead of a pop-up bar
+  installApp.prompt = e;
+});
+window.addEventListener('appinstalled', () => {
+  installApp.prompt = null;
+  installApp.installed = true;
+});
+
+const UA = navigator.userAgent;
+const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
+const IS_PHONE = IS_IOS || /Android/.test(UA);
+const IS_MAC = /Macintosh/.test(UA) && !IS_IOS;
+const IS_WINDOWS = /Windows NT/.test(UA);
+
+// Where an installed app lives on this device.
+const INSTALL_PLACE = IS_PHONE ? 'the home screen' : IS_MAC ? 'the Dock' : 'the Start menu and taskbar';
+
+function installHelpText() {
+  const openIt = `If it’s already installed, open Mesh Quotes from ${IS_MAC ? 'Launchpad' : 'the Start menu'}.`;
+  if (IS_IOS) return 'On iPhone or iPad, tap the Share button, then Add to Home Screen.';
+  if (/Android/.test(UA)) return 'In Chrome, tap ⋮ at the top right, then Add to Home screen.';
+  if (/Edg\//.test(UA)) return `In Edge, open the ⋯ menu at the top right, then Apps → Install this site as an app. ${openIt}`;
+  if (/Chrome\//.test(UA)) return `In Chrome, open the ⋮ menu at the top right, then Cast, save and share → Install page as app. ${openIt}`;
+  if (/Safari\//.test(UA) && IS_MAC) return 'In Safari, choose File → Add to Dock.';
+  return 'Open this page in Microsoft Edge or Google Chrome to install it as an app.';
+}
+
 async function loadKits(force = false) {
   if (state.kits.loaded && !force) return;
   try {
@@ -2509,9 +2546,22 @@ const SettingsPage = {
   },
   computed: {
     session: () => state.session,
+    install: () => installApp,
+    installHelp: () => installHelpText(),
+    installPlace: () => INSTALL_PLACE,
+    inWindowsApp: () => IN_WINDOWS_APP,
+    offerExe: () => IS_WINDOWS && !installApp.installed,
   },
   methods: {
     signOut,
+    async installNow() {
+      const offer = installApp.prompt;
+      if (!offer) return;
+      installApp.prompt = null; // each offer can only be used once
+      offer.prompt();
+      const { outcome } = await offer.userChoice;
+      if (outcome === 'accepted') toast('Installed. Mesh Quotes now opens in its own window.');
+    },
     isCore: (id) => CORE_LABOUR.includes(id),
     addMember() {
       this.s.team.push({ name: '', role: '', email: '', phone: '' });
@@ -2582,6 +2632,21 @@ const SettingsPage = {
     <section class="card account-card" v-if="session && session.authEnabled">
       <div><div class="strong">Signed in</div><div class="muted sm">You stay signed in on this device for 30 days.</div></div>
       <button class="btn" @click="signOut">Sign out</button>
+    </section>
+
+    <section class="card account-card">
+      <div>
+        <div class="strong">Use it like a program</div>
+        <div class="muted sm" v-if="inWindowsApp">You’re using the Mesh Quotes program for Windows. It shows the live website, so it’s always up to date and the quotes are the same everywhere.</div>
+        <div class="muted sm" v-else-if="install.installed">You’re using Mesh Quotes as an app on this device. It updates itself, and the quotes are the same as on the website.</div>
+        <div class="muted sm" v-else-if="install.prompt">Open Mesh Quotes from {{ installPlace }} in its own window, like a program. The quotes are the same as on the website, and it updates itself.</div>
+        <div class="muted sm" v-else>Mesh Quotes can open from {{ installPlace }} in its own window, like a program, with the same quotes as the website. {{ installHelp }}</div>
+        <div class="muted sm exe-download" v-if="offerExe">
+          Or <a href="/download/MeshQuotes.exe" download>download the Windows program</a> (MeshQuotes.exe, 1 MB). Save it anywhere and double-click it; there’s nothing to install.
+          Windows may warn that it isn’t commonly downloaded or is from an unknown publisher: choose <b>Keep</b>, then <b>More info → Run anyway</b>.
+        </div>
+      </div>
+      <button class="btn primary" v-if="!install.installed && install.prompt" @click="installNow">Install app</button>
     </section>
 
     <section class="card">
