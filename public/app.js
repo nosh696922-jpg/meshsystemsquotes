@@ -1,6 +1,6 @@
 /* Mesh quoting tool — browser app (Vue 3, no build step). */
 
-const { createApp, reactive, nextTick } = Vue;
+const { createApp, reactive, nextTick, toRaw } = Vue;
 const C = window.QuoteCalc;
 
 // ---- Small helpers -----------------------------------------------------------
@@ -81,6 +81,35 @@ function cleanVariantLabel(label) {
     .join(' · ');
 }
 
+// Our own names for catalogue products, keyed by product id, e.g. a Ubiquiti
+// UCG-Max added as "Home network router". Set on the Products page (Rename)
+// or from a quote line ("Always add … with this name").
+const productNames = reactive({ loaded: false, map: {} });
+let namesLoading = null;
+
+function loadProductNames() {
+  if (productNames.loaded) return Promise.resolve();
+  namesLoading ||= api('GET', '/api/product-names')
+    .then((data) => {
+      productNames.map = data.names || {};
+      productNames.loaded = true;
+    })
+    .catch((err) => console.warn(`Could not load saved product names: ${err.message}`))
+    .finally(() => {
+      namesLoading = null;
+    });
+  return namesLoading;
+}
+
+// An empty name goes back to the maker's name.
+async function saveProductName(id, name) {
+  const { names } = await api('PUT', '/api/product-names', { id, name });
+  productNames.map = names; // replaced whole, so lists that search the names update
+  productNames.loaded = true;
+}
+
+const savedName = (id) => (id && productNames.map[id]) || '';
+
 function itemFromProduct(product, variant, qty) {
   const label = cleanVariantLabel(variant.label);
   return {
@@ -89,7 +118,8 @@ function itemFromProduct(product, variant, qty) {
     source: product.source,
     productId: product.id,
     manufacturer: product.manufacturer,
-    name: product.name + (label ? ` (${label})` : ''),
+    // Options such as a colour go after our name too: "Kitchen speaker (Black)".
+    name: (savedName(product.id) || product.name) + (label ? ` (${label})` : ''),
     model: product.model,
     sku: variant.sku || product.model,
     variantLabel: label,
@@ -521,12 +551,14 @@ const Modal = {
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 // `filter` limits the list to one value of `filterKey` (a category, or a brand).
-function searchProducts(products, query, filter, filterKey = 'category') {
+// `aliases` are our own names for products ({ id: name }), searched too.
+function searchProducts(products, query, filter, filterKey = 'category', aliases = null) {
   const words = query.toLowerCase().split(/[\s-]+/).filter(Boolean);
   const nq = norm(query);
   const out = [];
   for (const p of products) {
     if (filter && p[filterKey] !== filter) continue;
+    const alias = aliases && aliases[p.id] ? aliases[p.id].toLowerCase() : '';
     if (words.length) {
       if (!p._hay) {
         // Searchable text: "primary" (name, model, SKUs) and everything.
@@ -534,7 +566,7 @@ function searchProducts(products, query, filter, filterKey = 'category') {
         Object.defineProperty(p, '_primary', { value: primary });
         Object.defineProperty(p, '_hay', { value: [primary, p.category, p.subCategory, p.description].join(' ').toLowerCase() });
       }
-      if (!words.every((w) => p._hay.includes(w))) continue;
+      if (!words.every((w) => p._hay.includes(w) || alias.includes(w))) continue;
     }
     let score = 0;
     if (nq) {
@@ -543,9 +575,9 @@ function searchProducts(products, query, filter, filterKey = 'category') {
       else if (model.startsWith(nq)) score += 40;
       else if (model.includes(nq)) score += 20;
       if ((p.variants || []).some((v) => norm(v.sku) === nq)) score += 80;
-      if (norm(p.shortName) === nq || norm(p.name) === nq) score += 60;
-      else if (norm(p.name).includes(nq)) score += 15;
-      score += 5 * words.filter((w) => p._primary.includes(w)).length;
+      if (norm(p.shortName) === nq || norm(p.name) === nq || norm(alias) === nq) score += 60;
+      else if (norm(p.name).includes(nq) || norm(alias).includes(nq)) score += 15;
+      score += 5 * words.filter((w) => p._primary.includes(w) || alias.includes(w)).length;
     }
     out.push({ p, score });
   }
@@ -554,6 +586,111 @@ function searchProducts(products, query, filter, filterKey = 'category') {
 }
 
 const STATUS_BADGE = { SoldOut: 'Sold out', ComingSoon: 'Coming soon', RegionNotAvailable: 'Unavailable', NoPrice: 'No trade price', Discontinued: 'Discontinued' };
+
+// ---- Sorting product lists, and hiding graded or out-of-stock products -------
+// Used by the product picker and the Products page. The choices are shared by
+// both and remembered on this device.
+
+const SORTS = { match: 'Best match', 'price-asc': 'Price: low to high', 'price-desc': 'Price: high to low', name: 'Name: A to Z' };
+const VIEW_KEYS = { sort: 'mesh.productSort', hideGraded: 'mesh.hideGraded', hideOutOfStock: 'mesh.hideOutOfStock' };
+const productView = reactive({
+  sort: SORTS[storageGet(VIEW_KEYS.sort)] ? storageGet(VIEW_KEYS.sort) : 'match',
+  hideGraded: storageGet(VIEW_KEYS.hideGraded) === '1',
+  hideOutOfStock: storageGet(VIEW_KEYS.hideOutOfStock) === '1',
+});
+
+// Graded, ex-display or refurbished stock. Habitech starts these names with
+// "Grade A -", "Graded B:" or "GRADED".
+const GRADED = /^\s*graded?\b|\b(?:ex[- ]?display|ex[- ]?demo|b[- ]?stock|open[- ]?box|refurbished|pre[- ]?owned)\b/i;
+const isGraded = (p) => GRADED.test(p.name || '');
+
+// Every option is sold out (Ubiquiti, Sonos) or out of stock (Habitech).
+function isOutOfStock(p) {
+  const options = p.variants || [];
+  return options.length > 0 && options.every((v) => v.status === 'SoldOut' || v.stock === 'out_of_stock');
+}
+
+// £0 means no price yet (e.g. Ubiquiti's "Coming soon" products).
+const priceOfOption = (v) => (v && v.status !== 'NoPrice' && v.price > 0 ? v.price : null);
+
+// The cheapest option ("from £…", as the Products page shows it).
+function lowestPrice(p) {
+  let low = null;
+  for (const v of p.variants || []) {
+    const price = priceOfOption(v);
+    if (price != null && (low == null || price < low)) low = price;
+  }
+  return low;
+}
+
+// The option the product picker shows first.
+function firstPrice(p) {
+  return priceOfOption((p.variants || []).find((v) => v.sku === p.defaultSku)) ?? lowestPrice(p);
+}
+
+const byName = new Intl.Collator('en-GB', { sensitivity: 'base', numeric: true }).compare;
+
+// Products without a price go last either way.
+function sortProducts(list, sort, priceOf) {
+  if (sort === 'name') return [...list].sort((a, b) => byName(a.name, b.name));
+  if (sort !== 'price-asc' && sort !== 'price-desc') return list;
+  const dir = sort === 'price-asc' ? 1 : -1;
+  return list
+    .map((p) => ({ p, price: priceOf(p) }))
+    .sort((a, b) => (a.price == null) - (b.price == null) || dir * (a.price - b.price) || byName(a.p.name, b.p.name))
+    .map((x) => x.p);
+}
+
+// For a component with `matches` (searched list), `isLive` and `live` (direct
+// Habitech search) and a `sortPrice(product)` method.
+const productListMixin = {
+  computed: {
+    view: () => productView,
+    SORTS: () => SORTS,
+    // What the search found, before hiding and sorting.
+    found() {
+      return this.isLive ? this.live.products : this.matches;
+    },
+    gradedCount() {
+      return this.found.filter(isGraded).length;
+    },
+    outOfStockCount() {
+      return this.found.filter(isOutOfStock).length;
+    },
+    shown() {
+      let list = this.found;
+      if (productView.hideGraded) list = list.filter((p) => !isGraded(p));
+      if (productView.hideOutOfStock) list = list.filter((p) => !isOutOfStock(p));
+      return sortProducts(list, productView.sort, (p) => this.sortPrice(p));
+    },
+    hiddenCount() {
+      return this.found.length - this.shown.length;
+    },
+    // Which switches are hiding something from this list.
+    hiddenBy() {
+      return {
+        hideGraded: productView.hideGraded && this.gradedCount > 0,
+        hideOutOfStock: productView.hideOutOfStock && this.outOfStockCount > 0,
+      };
+    },
+    // When everything that matches is hidden.
+    hiddenNote() {
+      const n = this.hiddenCount;
+      const why = [this.hiddenBy.hideGraded && 'graded', this.hiddenBy.hideOutOfStock && 'out of stock'].filter(Boolean).join(' or ');
+      return n === 1 ? `The only match is ${why}, so it’s hidden.` : `All ${n.toLocaleString('en-GB')} matches are ${why}, so they’re hidden.`;
+    },
+  },
+  methods: {
+    savedName,
+    setView(key, value) {
+      productView[key] = value;
+      storageSet(VIEW_KEYS[key], typeof value === 'boolean' ? (value ? '1' : '0') : value);
+    },
+    showHidden() {
+      for (const [key, hiding] of Object.entries(this.hiddenBy)) if (hiding) this.setView(key, false);
+    },
+  },
+};
 
 // ---- Live catalogues (Habitech) ---------------------------------------------------
 // Too big to load into the page, so they're searched on the server as you type.
@@ -772,7 +909,7 @@ const liveSearchMixin = {
 
 const ProductPicker = {
   components: { Modal, MoneyInput },
-  mixins: [liveSearchMixin],
+  mixins: [liveSearchMixin, productListMixin],
   props: { sectionName: String, quote: Object },
   emits: ['add', 'close'],
   data() {
@@ -805,10 +942,10 @@ const ProductPicker = {
       return [...new Set(this.pool.map((p) => p[this.filterKey]).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     },
     matches() {
-      return searchProducts(this.pool, this.q, this.category, this.filterKey);
+      return searchProducts(this.pool, this.q, this.category, this.filterKey, toRaw(productNames.map));
     },
     results() {
-      return this.isLive ? this.live.products : this.matches.slice(0, this.limit);
+      return this.isLive ? this.shown : this.shown.slice(0, this.limit);
     },
     searchHint() {
       return SEARCH_HINTS[this.tab] || `Search ${this.source ? this.source.label : ''} products`;
@@ -834,6 +971,9 @@ const ProductPicker = {
     category() {
       this.limit = 40;
     },
+    'view.sort'() {
+      this.limit = 40;
+    },
     tab() {
       this.category = '';
       this.limit = 40;
@@ -843,10 +983,12 @@ const ProductPicker = {
   mounted() {
     loadCatalogue();
     loadKits();
+    loadProductNames();
     nextTick(() => this.$refs.search?.focus());
   },
   methods: {
     ...sharedMethods,
+    sortPrice: firstPrice,
     // A kit's items priced with this quote's rates and today's catalogue prices.
     kitItems(kit) {
       const prices = storePriceIndex();
@@ -883,6 +1025,7 @@ const ProductPicker = {
     async add(p) {
       let v = this.variantOf(p);
       const qty = this.qtyOf(p);
+      if (!productNames.loaded) await loadProductNames();
       // The copied list is up to a day old: add Habitech products at today's price.
       if (isLiveSource(p.source) && this.hasCopy && !this.isLive) {
         try {
@@ -975,9 +1118,19 @@ const ProductPicker = {
             <option v-for="c in categories" :value="c">{{ c }}</option>
           </select>
         </div>
+        <div class="list-tools">
+          <label class="sort-by">Sort
+            <select :value="view.sort" @change="setView('sort', $event.target.value)" aria-label="Sort products">
+              <option v-for="(label, key) in SORTS" :value="key">{{ label }}</option>
+            </select>
+          </label>
+          <button v-if="gradedCount || view.hideGraded" type="button" class="chip toggle" :class="{ active: view.hideGraded }" :aria-pressed="view.hideGraded" @click="setView('hideGraded', !view.hideGraded)" title="Graded, ex-display and refurbished stock">Hide graded stock <span>{{ gradedCount.toLocaleString('en-GB') }}</span></button>
+          <button v-if="outOfStockCount || view.hideOutOfStock" type="button" class="chip toggle" :class="{ active: view.hideOutOfStock }" :aria-pressed="view.hideOutOfStock" @click="setView('hideOutOfStock', !view.hideOutOfStock)">Hide out of stock <span>{{ outOfStockCount.toLocaleString('en-GB') }}</span></button>
+          <span class="sort-note" v-if="isLive && live.hasMore && view.sort !== 'match'">Sorts the {{ live.products.length }} shown so far</span>
+        </div>
 
         <p class="picker-meta" v-if="isLiveTab && hasCopy && !isLive">
-          All {{ pool.length.toLocaleString('en-GB') }} {{ source.label }} products · price is the SRP and our cost is our trade price, both ex VAT · today’s price is checked as you add<template v-if="q || category"> · {{ matches.length.toLocaleString('en-GB') }} match{{ matches.length === 1 ? '' : 'es' }}</template>
+          All {{ pool.length.toLocaleString('en-GB') }} {{ source.label }} products · price is the SRP and our cost is our trade price, both ex VAT · today’s price is checked as you add<template v-if="q || category || hiddenCount"> · {{ shown.length.toLocaleString('en-GB') }} {{ q || category ? 'match' + (shown.length === 1 ? '' : 'es') : 'shown' }}</template>
         </p>
         <p class="picker-meta" v-else-if="isLive && hasCopy">Nothing in the {{ source.label }} list matches, so these come straight from {{ source.label }}<template v-if="live.products.length"> · {{ live.total.toLocaleString('en-GB') }} match{{ live.total === 1 ? '' : 'es' }}</template></p>
         <p class="picker-meta" v-else-if="isLive && source.configured !== false">
@@ -1001,6 +1154,7 @@ const ProductPicker = {
         <div v-else-if="isLive && live.loading && !live.products.length" class="empty loading">Searching {{ source.label }}…</div>
         <div v-else-if="isLive && !results.length" class="empty">
           <template v-if="q.trim().length < 2">Type a product name, brand or part code to search {{ source.label }}<template v-if="liveInfo && liveInfo.count">’s {{ liveInfo.count.toLocaleString('en-GB') }} products</template>.</template>
+          <template v-else-if="hiddenCount">{{ hiddenNote }} <button class="link" @click="showHidden">Show {{ hiddenCount === 1 ? 'it' : 'them' }}</button></template>
           <template v-else>Nothing at {{ source.label }} matches “{{ q }}”.</template>
         </div>
         <div v-else-if="cat.loading && !cat.loaded && !isLiveTab" class="empty loading">Loading products…</div>
@@ -1008,6 +1162,7 @@ const ProductPicker = {
           <template v-if="tab === 'custom' && !pool.length">No saved products yet. Use <b>One-off item</b> and tick “Save to Our products”, or add them on the Products page.</template>
           <template v-else-if="source && source.kind === 'import' && !pool.length">No {{ source.label }} price list yet. Import it on the <a href="#/products" @click="$emit('close')">Products page</a>.</template>
           <template v-else-if="source && !pool.length">No {{ source.label }} products yet — refresh on the Products page.</template>
+          <template v-else-if="hiddenCount">{{ hiddenNote }} <button class="link" @click="showHidden">Show {{ hiddenCount === 1 ? 'it' : 'them' }}</button></template>
           <template v-else>No products match “{{ q }}”.</template>
         </div>
 
@@ -1017,6 +1172,7 @@ const ProductPicker = {
             <div class="thumb"><img v-if="p.image" :src="p.image" alt="" loading="lazy"></div>
             <div class="r-main">
               <div class="r-name">{{ p.name }}</div>
+              <div class="saved-as" v-if="savedName(p.id)">Added as “{{ savedName(p.id) }}”</div>
               <div class="r-sub">{{ p.manufacturer }} · {{ variantOf(p).sku || p.model }}<span v-if="p.subCategory"> · {{ p.category }} / {{ p.subCategory }}</span><span v-else-if="p.category && p.source !== 'custom'"> · {{ p.category }}</span></div>
               <div class="r-desc" v-if="p.description && p.description !== p.name">{{ p.description }}</div>
               <select v-if="p.variants.length > 1" class="variant" :value="variantOf(p).sku" @change="variants[p.id] = $event.target.value" aria-label="Option">
@@ -1044,8 +1200,8 @@ const ProductPicker = {
               </template>
             </div>
           </li>
-          <li v-if="!isLive && matches.length > results.length" class="more">
-            <button class="btn ghost" @click="limit += 40">Show more ({{ matches.length - results.length }} more)</button>
+          <li v-if="!isLive && shown.length > results.length" class="more">
+            <button class="btn ghost" @click="limit += 40">Show more ({{ (shown.length - results.length).toLocaleString('en-GB') }} more)</button>
           </li>
           <li v-if="isLive && live.hasMore" class="more">
             <button class="btn ghost" @click="runLiveSearch(true)" :disabled="live.loading">{{ live.loading ? 'Loading…' : 'Show more (' + (live.total - results.length).toLocaleString('en-GB') + ' more)' }}</button>
@@ -1238,6 +1394,7 @@ const QuoteEditor = {
       descOpen: {},
       discOpen: {},
       costOpen: {},
+      renamed: {}, // lines renamed since the quote was opened
       activity: null,
       revisions: null,
       compareN: null,
@@ -1356,6 +1513,7 @@ const QuoteEditor = {
   },
   async mounted() {
     loadCatalogue();
+    loadProductNames();
     try {
       const quote = await api('GET', `/api/quotes/${this.id}`);
       this.setQuote(quote);
@@ -1674,6 +1832,37 @@ const QuoteEditor = {
     liveStock(item) {
       return isLiveSource(item.source) ? stockText(this.livePrices[priceKey(item)]) : '';
     },
+
+    // Our own names for catalogue products (Our products are renamed on the
+    // Products page instead).
+    nameId(item) {
+      return item.productId && C.isCatalogueItem(item) ? item.productId : null;
+    },
+    // The line's name without the option on the end, e.g. "(Black)".
+    baseName(item) {
+      const name = String(item.name || '').trim();
+      const option = item.variantLabel ? ` (${item.variantLabel})` : '';
+      return option && name.endsWith(option) ? name.slice(0, -option.length).trim() : name;
+    },
+    hasSavedName(item) {
+      const saved = savedName(this.nameId(item));
+      return Boolean(saved) && saved === this.baseName(item);
+    },
+    // Offered after a catalogue line is renamed.
+    nameOffer(item) {
+      return Boolean(this.renamed[item.id] && this.nameId(item) && this.baseName(item) && !this.hasSavedName(item));
+    },
+    async rememberName(item) {
+      const name = this.baseName(item);
+      try {
+        await saveProductName(this.nameId(item), name);
+        this.renamed[item.id] = false;
+        const example = item.variantLabel ? `, e.g. “${name} (${item.variantLabel})”` : '';
+        toast(`Saved. From now on it’s added to quotes as “${name}”${example}.`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    },
     liveStockLevel(item) {
       return this.livePrices[priceKey(item)]?.stock || '';
     },
@@ -1802,10 +1991,15 @@ const QuoteEditor = {
                 <template v-else>
                   <div class="thumb"><img v-if="item.image" :src="item.image" alt=""></div>
                   <div class="l-main">
-                    <input class="l-name plain-input" v-model="item.name" aria-label="Item name">
+                    <input class="l-name plain-input" v-model="item.name" aria-label="Item name" @change="renamed[item.id] = true">
+                    <div class="name-offer" v-if="nameOffer(item)">
+                      <button class="link sm" @click="rememberName(item)">Always use this name for this product</button>
+                      <button class="link sm muted" @click="renamed[item.id] = false">Just this quote</button>
+                    </div>
                     <div class="l-sub">
                       <span class="src" :class="item.source">{{ item.manufacturer }}</span>
                       <span>{{ item.sku || item.model }}</span>
+                      <span class="saved-name-tag" v-if="hasSavedName(item)" title="Every quote gets this name for this product. Change it on the Products page (Rename).">Saved name</span>
                       <span class="stock" v-if="liveStock(item)" :class="liveStockLevel(item)">{{ liveStock(item) }}</span>
                       <a v-if="item.url" :href="item.url" target="_blank" rel="noopener">store page ↗</a>
                       <button class="link sm" @click="descOpen[item.id] = !descOpen[item.id]">{{ descOpen[item.id] ? 'Hide description' : 'Description' }}</button>
@@ -2173,9 +2367,9 @@ const QuoteEditor = {
 
 const ProductsPage = {
   components: { MoneyInput, Modal },
-  mixins: [liveSearchMixin],
+  mixins: [liveSearchMixin, productListMixin],
   data() {
-    return { tab: 'ubiquiti', q: '', category: '', limit: 60, editing: null, kitEditing: null };
+    return { tab: 'ubiquiti', q: '', category: '', limit: 60, editing: null, kitEditing: null, naming: null };
   },
   computed: {
     cat() {
@@ -2197,10 +2391,10 @@ const ProductsPage = {
       return [...new Set(this.pool.map((p) => p[this.filterKey]).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     },
     matches() {
-      return searchProducts(this.pool, this.q, this.category, this.filterKey);
+      return searchProducts(this.pool, this.q, this.category, this.filterKey, toRaw(productNames.map));
     },
     rows() {
-      return this.isLive ? this.live.products : this.matches.slice(0, this.limit);
+      return this.isLive ? this.shown : this.shown.slice(0, this.limit);
     },
     // A copy of a live catalogue being made (or refreshed) right now.
     copyJob() {
@@ -2216,15 +2410,39 @@ const ProductsPage = {
       this.category = '';
       this.limit = 60;
     },
+    'view.sort'() {
+      this.limit = 60;
+    },
   },
   mounted() {
     loadCatalogue();
     loadKits();
+    loadProductNames();
     for (const s of catalogueSources()) if (s.kind === 'live') loadLiveStatus(s.id);
   },
   methods: {
     ...sharedMethods,
     formatDay,
+    sortPrice: lowestPrice,
+    // Our own name for a product on quotes.
+    rename(p) {
+      const option = p.variants.length > 1 ? p.variants.map((v) => cleanVariantLabel(v.label)).find(Boolean) || '' : '';
+      this.naming = { id: p.id, original: p.name, manufacturer: p.manufacturer, model: p.model, option, saved: savedName(p.id), name: savedName(p.id), busy: false };
+      nextTick(() => this.$refs.nameInput?.focus());
+    },
+    async saveName(clear = false) {
+      const n = this.naming;
+      const name = clear ? '' : n.name.trim();
+      n.busy = true;
+      try {
+        await saveProductName(n.id, name === n.original ? '' : name);
+        this.naming = null;
+        toast(name && name !== n.original ? `“${n.original}” is now added to quotes as “${name}”` : `“${n.original}” is added with ${n.manufacturer}’s name again`);
+      } catch (err) {
+        n.busy = false;
+        toast(err.message, 'error');
+      }
+    },
     sync() {
       syncCatalogue(this.tab);
     },
@@ -2442,8 +2660,18 @@ const ProductsPage = {
     <div class="toolbar-row">
       <input class="search" type="search" v-model="q" :placeholder="isLiveTab ? 'Search ' + source.label + ' by name, brand or part code' : 'Search by name, model or SKU'">
       <select v-if="!isLiveTab || hasCopy" v-model="category"><option value="">{{ filterLabel }}</option><option v-for="c in categories" :value="c">{{ c }}</option></select>
-      <span class="muted sm" v-if="!isLive">{{ matches.length.toLocaleString('en-GB') }} product{{ matches.length === 1 ? '' : 's' }}</span>
+      <span class="muted sm" v-if="!isLive">{{ shown.length.toLocaleString('en-GB') }} product{{ shown.length === 1 ? '' : 's' }}<template v-if="hiddenCount"> ({{ hiddenCount.toLocaleString('en-GB') }} hidden)</template></span>
       <span class="muted sm" v-else-if="live.products.length">{{ live.total.toLocaleString('en-GB') }} match{{ live.total === 1 ? '' : 'es' }}{{ hasCopy ? ', straight from ' + source.label : '' }}</span>
+    </div>
+    <div class="list-tools page-tools">
+      <label class="sort-by">Sort
+        <select :value="view.sort" @change="setView('sort', $event.target.value)" aria-label="Sort products">
+          <option v-for="(label, key) in SORTS" :value="key">{{ label }}</option>
+        </select>
+      </label>
+      <button v-if="gradedCount || view.hideGraded" type="button" class="chip toggle" :class="{ active: view.hideGraded }" :aria-pressed="view.hideGraded" @click="setView('hideGraded', !view.hideGraded)" title="Graded, ex-display and refurbished stock">Hide graded stock <span>{{ gradedCount.toLocaleString('en-GB') }}</span></button>
+      <button v-if="outOfStockCount || view.hideOutOfStock" type="button" class="chip toggle" :class="{ active: view.hideOutOfStock }" :aria-pressed="view.hideOutOfStock" @click="setView('hideOutOfStock', !view.hideOutOfStock)">Hide out of stock <span>{{ outOfStockCount.toLocaleString('en-GB') }}</span></button>
+      <span class="sort-note" v-if="isLive && live.hasMore && view.sort !== 'match'">Sorts the {{ live.products.length }} shown so far</span>
     </div>
 
     <div class="card table-card" :class="{ refreshing: isLive && live.loading && live.products.length }">
@@ -2453,12 +2681,14 @@ const ProductsPage = {
         <div class="empty error-text" v-else-if="live.error">{{ live.error }}</div>
         <div class="empty loading" v-else-if="live.loading && !live.products.length">Searching {{ source.label }}…</div>
         <div class="empty" v-else-if="!live.products.length">{{ q.trim().length < 2 ? 'Type a product name, brand or part code to search ' + source.label + '.' : 'Nothing at ' + source.label + ' matches “' + q + '”.' }}</div>
+        <div class="empty" v-else-if="!rows.length">{{ hiddenNote }} <button class="link" @click="showHidden">Show {{ hiddenCount === 1 ? 'it' : 'them' }}</button></div>
       </template>
       <div class="empty loading" v-else-if="cat.loading && !cat.loaded && !isLiveTab">Loading…</div>
-      <div class="empty" v-else-if="!matches.length">
+      <div class="empty" v-else-if="!shown.length">
         <template v-if="tab === 'custom' && !pool.length">No products yet. Add products from other manufacturers here so you can reuse them on quotes.</template>
         <template v-else-if="source && source.kind === 'import' && !pool.length">Import the price list above to see the products here.</template>
         <template v-else-if="source && !pool.length">No products yet — click Refresh prices now.</template>
+        <template v-else-if="hiddenCount">{{ hiddenNote }} <button class="link" @click="showHidden">Show {{ hiddenCount === 1 ? 'it' : 'them' }}</button></template>
         <template v-else>No products match.</template>
       </div>
       <table class="list products" v-if="rows.length">
@@ -2468,6 +2698,7 @@ const ProductsPage = {
             <td class="thumb-cell"><div class="thumb"><img v-if="p.image" :src="p.image" alt="" loading="lazy"></div></td>
             <td>
               <div class="strong">{{ p.name }}</div>
+              <div class="saved-as" v-if="savedName(p.id)">On quotes as “{{ savedName(p.id) }}”</div>
               <div class="muted sm">{{ p.manufacturer }} · {{ isLiveTab ? p.defaultSku : p.model }}<span v-if="isLiveTab && p.model !== p.defaultSku"> · part {{ p.model }}</span><span v-if="p.variants.length > 1"> · {{ p.variants.length }} options</span><span v-if="p.hasOptions"> · sold in options</span></div>
               <div class="stock sm" v-if="stockText(p.variants[0])" :class="p.variants[0].stock">{{ stockText(p.variants[0]) }}</div>
             </td>
@@ -2482,13 +2713,14 @@ const ProductsPage = {
             </td>
             <td class="actions">
               <a v-if="p.url" class="btn ghost sm" :href="p.url" target="_blank" rel="noopener">Store ↗</a>
+              <button v-if="p.source !== 'custom'" class="btn ghost sm" @click="rename(p)" title="Choose the name this product gets on quotes">Rename</button>
               <template v-if="p.source === 'custom'">
                 <button class="btn ghost sm" @click="edit(p)">Edit</button>
                 <button class="btn ghost sm danger" @click="remove(p)">Delete</button>
               </template>
             </td>
           </tr>
-          <tr v-if="!isLive && matches.length > limit"><td colspan="5" class="more"><button class="btn ghost" @click="limit += 60">Show more</button></td></tr>
+          <tr v-if="!isLive && shown.length > limit"><td colspan="5" class="more"><button class="btn ghost" @click="limit += 60">Show more</button></td></tr>
           <tr v-if="isLive && live.hasMore"><td colspan="5" class="more"><button class="btn ghost" @click="runLiveSearch(true)" :disabled="live.loading">{{ live.loading ? 'Loading…' : 'Show more' }}</button></td></tr>
         </tbody>
       </table>
@@ -2503,6 +2735,18 @@ const ProductsPage = {
       <template #footer>
         <button class="btn" @click="kitEditing = null">Cancel</button>
         <button class="btn primary" type="submit" form="kit-edit-form">Save</button>
+      </template>
+    </Modal></Transition>
+
+    <Transition name="modal"><Modal v-if="naming" title="Name on quotes" @close="naming = null">
+      <form class="form-grid" id="name-form" @submit.prevent="saveName(false)">
+        <p class="hint span-2">“{{ naming.original }}” is {{ naming.manufacturer }}’s name for it. Choose the name your clients see instead: it’s used every time this product is added to a quote<template v-if="naming.option">, with the option after it, e.g. “{{ naming.name.trim() || naming.original }} ({{ naming.option }})”</template>. Quotes that already have it keep their name.</p>
+        <label class="span-2">Name on quotes<input ref="nameInput" v-model="naming.name" :placeholder="naming.original" maxlength="300"></label>
+      </form>
+      <template #footer>
+        <button class="btn ghost" v-if="naming.saved" @click="saveName(true)" :disabled="naming.busy">Use {{ naming.manufacturer }}’s name</button>
+        <button class="btn" @click="naming = null">Cancel</button>
+        <button class="btn primary" type="submit" form="name-form" :disabled="naming.busy">Save</button>
       </template>
     </Modal></Transition>
 

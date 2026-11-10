@@ -156,6 +156,20 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
   Habitech API key (see *Connecting Habitech*).
 - **Other manufacturers** – add a one-off item while quoting, or save products
   to **Our products** to reuse them.
+- **Sorting and hiding** – in **Add product** and on the Products page, sort by
+  best match, price (low to high or high to low) or name, and switch on
+  **Hide graded stock** (Habitech's “Grade A/B/C” and refurbished items) or
+  **Hide out of stock** (sold out at Ubiquiti or Sonos, out of stock at
+  Habitech). Each switch shows how many products it hides, and each computer
+  remembers the choices.
+- **Our own product names** – give a catalogue product the name clients
+  should see, e.g. the Ubiquiti UCG-Max as “Home network router”. Rename a line
+  on a quote and click **Always use this name for this product**, or use
+  **Rename** on the Products page. From then on it's added to quotes with that
+  name, with any colour or option after it (“Kitchen speaker (White)”), and
+  searching for the name finds it. Quotes that already have it keep their
+  name. To show only the name on proposals, untick **Manufacturer and model
+  numbers** under **Pricing & terms → What the proposal shows**.
 - **Labour** – Installation, Commissioning, Programming and Project management
   (add more in Settings). Add labour to any product as hours *per unit*, so it
   scales with quantity, or add a standalone labour line to an area.
@@ -205,6 +219,7 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
 | `lib/proposal.js`, `public/proposal.css` | The client-facing proposal |
 | `lib/client.js` | Client views and replies (accept, changes, decline) |
 | `lib/revisions.js`, `lib/kits.js` | Saved versions of quotes, and kits |
+| `lib/names.js` | Our own names for catalogue products |
 | `lib/pdf.js` | One-click PDF via Edge/Chrome (local only) |
 | `public/app.js`, `public/styles.css` | The quoting app |
 | `public/shared/calc.js` | Pricing maths, shared by app and proposal |
@@ -247,6 +262,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v4.1` | Habitech catalogue (search Habitech live with our trade prices and stock; needs `HABITECH_API_KEY` in Vercel), each area’s labour shown at the bottom of that area in proposals, and a Sonos trade discount alongside the Ubiquiti one, both at the top of their Products tabs. Rolling back to `v4` hides Habitech products and puts labour back in one section, but quote lines already added keep their prices |
 | `v4.2` | The Habitech tab lists every product (a copy of the whole list, refreshed nightly) with a brand filter and instant search, falling back to searching Habitech when nothing matches. Today’s price is checked when you add a Habitech product. Rolling back to `v4.1` goes back to search-only (the saved copy is simply ignored) |
 | `v4.3` | Use it like a program: the website can be installed as an app (own window and icon, from **Settings → Use it like a program**), and a Windows program, `MeshQuotes.exe`, can be downloaded from the same place. Rolling back to `v4.2` removes the install option and the download, but copies of the program people already have keep working |
+| `v4.4` | Sort products by price (low to high, high to low) or name, switches to hide graded stock and out-of-stock products, and our own names for catalogue products (e.g. UCG-Max added as “Home network router”). Rolling back to `v4.3` removes these; quote lines keep the names they were given, and the saved names come back when you move forward again |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s
