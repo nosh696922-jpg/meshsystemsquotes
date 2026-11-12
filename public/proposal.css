@@ -134,17 +134,29 @@ body.web-mode { background: var(--paper); }
   mask-composite: intersect;
 }
 
-/* Separate cover page (an option for bigger proposals) */
-.cover-page {
-  min-height: 297mm; padding: 20mm 18mm 18mm; overflow: hidden; break-after: page;
-  /* Solid colours only (no see-through glow), so every PDF viewer and printer shows it the same. */
-  background: linear-gradient(180deg, #e3edf8 0%, #f1f6fb 30%, #ffffff 60%);
+/* The front cover: the designer's house picture on a page of its own (on for
+   new quotes). The picture has the Client / Project / Date / Revision labels;
+   the white boxes beside them are drawn here so they can widen to fit. Sizes
+   are in cqw (1% of the cover's width: 2.1 mm on paper), so it all scales on
+   screen; they're the boxes' positions in the designer's PDF, in points ÷ 5.9528. */
+.front-cover { position: relative; container-type: inline-size; break-after: page; background: #16161d; color: #16161d; }
+.fc-art { display: block; width: 100%; height: auto; aspect-ratio: 2481 / 3508; }
+.fc-fields { margin: 0; }
+.fc-field {
+  position: absolute; left: 11.91cqw; height: 1.7cqw;
+  display: flex; align-items: center;
+  min-width: 19.08cqw; max-width: 43cqw; padding: 0 0.85cqw;
+  background: #fff;
 }
-/* On screen the cover is shorter than a page, so the title isn't below the fold. */
-.web-mode .cover-page { min-height: 0; }
-.web-mode .cover-page .cover-main { margin-top: 42mm; }
+.fc-client { top: 124.34cqw; }
+.fc-project { top: 126.81cqw; height: 1.71cqw; }
+.fc-date { top: 129.32cqw; }
+.fc-revision { top: 131.82cqw; }
+/* The labels are in the picture; these are for screen readers. */
+.fc-field dt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.fc-field dd { margin: 0; min-width: 0; font-size: 1.18cqw; font-weight: 500; line-height: 1.4; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Default: the cover details sit at the top of page 1 */
+/* The cover details sit at the top of page 1 (page 2 after a front cover) */
 .cover-header { padding: 0 0 6mm; }
 .web-mode .cover-header { padding: 14mm 16mm 0; }
 .web-mode .cover-header + .page-flow { padding-top: 6mm; }
@@ -152,7 +164,6 @@ body.web-mode { background: var(--paper); }
 .cover-header .cover-main { margin: 9mm 0 6mm; }
 .cover.cover-header .eyebrow { margin-bottom: 3mm; }
 .cover.cover-header h1 { font-size: 24pt; }
-.cover-header .cover-client { display: none; } /* "Prepared for" follows straight after */
 .cover-header .cover-meta { padding-top: 4mm; }
 .cover-top { display: flex; justify-content: space-between; align-items: flex-end; }
 .cover-logo { width: 38mm; height: auto; display: block; }
@@ -167,7 +178,6 @@ body.web-mode { background: var(--paper); }
 .cover h1 { color: var(--ink); font-size: 34pt; font-weight: 600; line-height: 1.1; letter-spacing: -0.03em; text-wrap: balance; }
 /* Ends the title with the blue full stop from the Mesh logo. */
 .cover h1::after { content: ''; display: inline-block; width: 0.17em; height: 0.17em; margin-left: 0.07em; background: var(--blue); }
-.cover-client { margin-top: 6mm; font-size: 13pt; font-weight: 300; color: var(--text); }
 .cover-meta {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 6mm;
   padding-top: 6mm; border-top: 1px solid var(--line);
@@ -349,8 +359,8 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   .web-mode .doc { width: auto; max-width: none; margin: 0; box-shadow: none; border-radius: 0; overflow: visible; animation: none; }
   .web-mode .page-flow { padding: 0; }
   .web-mode .cover-header { padding: 0 0 6mm; background: #fff; }
-  .web-mode .cover-page, .cover-page { height: 297mm; min-height: 0; }
-  .web-mode .cover-page .cover-main { margin-top: auto; }
+  .front-cover { width: 210mm; height: 297mm; overflow: hidden; }
+  .fc-art { width: 210mm; height: 297mm; }
 }
 
 /* ---- Small screens ---------------------------------------------------------- */
@@ -359,8 +369,6 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   .web-mode .doc { max-width: 100%; margin: 0; border-radius: 0; }
   .web-mode .page-flow { padding: 24px 16px; }
   .web-mode .cover { padding: 24px 16px 0; }
-  .web-mode .cover-page .cover-main { margin: 64px 0 40px; }
-  .web-mode .cover-page { padding-bottom: 20px; }
   .cover h1 { font-size: 25pt; }
   .cover-meta { grid-template-columns: 1fr 1fr; padding: 16px 0 0; gap: 16px; }
   .parties, .investment { grid-template-columns: 1fr; }

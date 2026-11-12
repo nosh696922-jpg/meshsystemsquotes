@@ -792,6 +792,12 @@ function stockText(v) {
   return '';
 }
 
+// A quantity to order on Habitech's website: a whole number up to 999, or 0.
+function basketQty(n) {
+  const q = Math.round(Number(n));
+  return q >= 1 ? Math.min(999, q) : 0;
+}
+
 const BLANK_LIVE = { key: '', products: [], total: 0, hasMore: false, loading: false, error: null, fuzzy: false, didYouMean: null };
 
 // Search-as-you-type for a live catalogue. Used by the product picker and the
@@ -1403,6 +1409,7 @@ const QuoteEditor = {
       kitDraft: null,
       hideProfit: storageGet('mesh.hideProfit') === '1',
       livePrices: {}, // today's Habitech price, cost and stock, keyed like priceKey()
+      basket: null, // the "Add to Habitech basket" window
     };
   },
   computed: {
@@ -1464,6 +1471,55 @@ const QuoteEditor = {
       const keys = new Set();
       for (const s of this.quote.sections) for (const i of s.items) if (i.kind !== 'labour' && i.sku && isLiveSource(i.source)) keys.add(priceKey(i));
       return [...keys].sort().join('\n');
+    },
+    // The quote's Habitech products, each part code once with its total
+    // quantity and the areas it's in.
+    habitechLines() {
+      if (!this.quote) return [];
+      const rows = new Map();
+      for (const s of this.quote.sections) {
+        for (const item of s.items) {
+          if (item.kind === 'labour' || item.source !== 'habitech' || !item.sku) continue;
+          const key = item.sku.toUpperCase();
+          if (!rows.has(key)) rows.set(key, { sku: item.sku, item, qty: 0, areas: [] });
+          const row = rows.get(key);
+          row.qty += Math.max(0, Math.ceil(Number(item.qty) || 0));
+          if (s.name && !row.areas.includes(s.name)) row.areas.push(s.name);
+        }
+      }
+      return [...rows.values()];
+    },
+    basketRows() {
+      return this.basket ? this.basket.rows.filter((r) => r.id) : [];
+    },
+    // The front cover tick box. Quotes made before the front cover existed
+    // follow their old "Separate cover page" setting until it's changed
+    // (the same rule as the proposal, in lib/proposal.js).
+    frontCover: {
+      get() {
+        const own = this.quote.display || {};
+        return typeof own.frontCover === 'boolean' ? own.frontCover : own.coverPage === true;
+      },
+      set(on) {
+        this.quote.display.frontCover = on;
+      },
+    },
+    basketMissing() {
+      return this.basket ? this.basket.rows.filter((r) => r.state === 'missing') : [];
+    },
+    basketUnchecked() {
+      return this.basket ? this.basket.rows.filter((r) => r.state === 'unchecked') : [];
+    },
+    basketPicked() {
+      return this.basketRows.filter((r) => r.pick && basketQty(r.order));
+    },
+    basketItems() {
+      return this.basketPicked.reduce((n, r) => n + basketQty(r.order), 0);
+    },
+    // Opening this adds the ticked products to the basket on Habitech's website.
+    basketLink() {
+      if (!this.basket?.link || !this.basketPicked.length) return '';
+      return this.basket.link + this.basketPicked.map((r) => `${r.id},${basketQty(r.order)}`).join(';');
     },
     changedPrices() {
       if (!this.quote || !state.catalogue.loaded) return [];
@@ -1867,6 +1923,38 @@ const QuoteEditor = {
       return this.livePrices[priceKey(item)]?.stock || '';
     },
 
+    // Add to Habitech basket: find each product on Habitech's website, then
+    // the team ticks what to order and opens the basket link.
+    async openBasket() {
+      const seq = (this.basketSeq = (this.basketSeq || 0) + 1);
+      const rows = this.habitechLines.map((r) => ({ ...r, order: Math.max(1, r.qty), pick: r.qty > 0, id: null, state: 'checking' }));
+      this.basket = { rows, loading: true, error: null, link: '' };
+      try {
+        const res = await api('POST', '/api/habitech/basket', { skus: rows.map((r) => r.sku) });
+        if (!this.basket || this.basketSeq !== seq) return; // closed or reopened meanwhile
+        for (const r of this.basket.rows) {
+          r.id = res.ids[r.sku] || null;
+          r.state = r.id ? 'found' : res.missing.includes(r.sku) ? 'missing' : 'unchecked';
+        }
+        this.basket.link = res.link;
+      } catch (err) {
+        if (this.basket && this.basketSeq === seq) this.basket.error = err.message;
+      } finally {
+        if (this.basket && this.basketSeq === seq) this.basket.loading = false;
+      }
+    },
+    pickAllBasket(on) {
+      for (const r of this.basketRows) r.pick = on;
+    },
+    basketOpened(e) {
+      if (!this.basketLink) {
+        e.preventDefault();
+        return;
+      }
+      toast('Opened Habitech’s website in a new tab. Check the basket there before you check out.');
+      setTimeout(() => (this.basket = null), 300); // after the link has opened
+    },
+
     // Proposal text
     addScope() {
       this.quote.scope.push({ id: uid(), heading: 'New section', body: '' });
@@ -2221,7 +2309,7 @@ const QuoteEditor = {
                 <option value="end">In one section after the areas</option>
               </select>
             </label>
-            <label class="check cover-option"><input type="checkbox" v-model="quote.display.coverPage"> Separate cover page <small class="muted">(adds a page; good for bigger proposals)</small></label>
+            <label class="check cover-option"><input type="checkbox" v-model="frontCover"> Front cover <small class="muted">(the house picture with client, project, date and revision; adds a page)</small></label>
           </section>
 
           <section class="card">
@@ -2327,6 +2415,11 @@ const QuoteEditor = {
           <p class="profit-note" v-if="totals.missingCost">{{ totals.missingCost }} item{{ totals.missingCost === 1 ? ' has' : 's have' }} no cost price, so {{ totals.missingCost === 1 ? 'it counts' : 'they count' }} at the selling price.</p>
         </div>
         <button v-else class="link sm show-profit" @click="toggleProfit">Show profit</button>
+        <div class="card habitech-card" v-if="habitechLines.length">
+          <h3>Habitech</h3>
+          <p class="muted sm">{{ habitechLines.length }} product{{ habitechLines.length === 1 ? '' : 's' }} on this quote {{ habitechLines.length === 1 ? 'comes' : 'come' }} from Habitech.</p>
+          <button class="btn" @click="openBasket">Add to Habitech basket</button>
+        </div>
         <div class="card side-meta">
           <div><span>Client</span>{{ quote.client.company || quote.client.name || '—' }}</div>
           <div><span>Prepared by</span>{{ quote.preparedBy || '—' }}</div>
@@ -2348,6 +2441,48 @@ const QuoteEditor = {
       <template #footer>
         <button class="btn" @click="kitDraft = null">Cancel</button>
         <button class="btn primary" type="submit" form="kit-form" :disabled="kitDraft.saving">{{ kitDraft.saving ? 'Saving…' : 'Save kit' }}</button>
+      </template>
+    </Modal></Transition>
+
+    <Transition name="modal"><Modal v-if="basket" title="Add to Habitech basket" @close="basket = null">
+      <p class="hint">Tick what to order. <b>Open Habitech basket</b> opens Habitech’s website in a new tab with these added to your basket, and you check out there as normal. Sign in to Habitech in your browser first to see our prices. Anything already in the basket stays there.</p>
+      <div class="empty loading" v-if="basket.loading">Finding these on Habitech’s website…</div>
+      <p class="basket-error" v-else-if="basket.error">{{ basket.error }} <button class="link" @click="openBasket">Try again</button></p>
+      <template v-else>
+        <div class="basket-tools" v-if="basketRows.length > 1">
+          <button class="link sm" @click="pickAllBasket(true)">Tick all</button>
+          <button class="link sm" @click="pickAllBasket(false)">Untick all</button>
+        </div>
+        <ul class="basket-list" v-if="basketRows.length">
+          <li v-for="r in basketRows" :key="r.sku" :class="{ off: !r.pick }">
+            <input type="checkbox" v-model="r.pick" :aria-label="'Order ' + r.item.name">
+            <div class="b-main" @click="r.pick = !r.pick">
+              <div class="b-name">{{ r.item.name }}</div>
+              <div class="b-sub">
+                <span>{{ [r.item.manufacturer, r.item.model].filter(Boolean).join(' ') }}</span>
+                <span v-if="r.item.model !== r.sku">Habitech {{ r.sku }}</span>
+                <span v-if="r.areas.length">{{ r.areas.join(', ') }}</span>
+                <span class="stock" v-if="liveStock(r.item)" :class="liveStockLevel(r.item)">{{ liveStock(r.item) }}</span>
+              </div>
+            </div>
+            <label class="b-qty"><span>Qty</span><input type="number" min="1" max="999" step="1" v-model.number="r.order" :disabled="!r.pick" :aria-label="'Quantity of ' + r.item.name"></label>
+          </li>
+        </ul>
+        <p class="muted" v-else>None of this quote’s Habitech products are sold on Habitech’s website.</p>
+        <div class="basket-missing" v-if="basketMissing.length">
+          <h4>Not on Habitech’s website</h4>
+          <p class="muted sm">Order {{ basketMissing.length === 1 ? 'this' : 'these' }} from Habitech by phone or email:</p>
+          <ul>
+            <li v-for="r in basketMissing" :key="r.sku">{{ r.qty }} × {{ r.item.name }} <span class="muted">{{ r.sku }}</span></li>
+          </ul>
+        </div>
+        <p class="basket-error" v-if="basketUnchecked.length">Couldn’t check {{ basketUnchecked.length === 1 ? '1 product' : basketUnchecked.length + ' products' }} on Habitech’s website this time ({{ basketUnchecked.map(r => r.sku).join(', ') }}). <button class="link" @click="openBasket">Try again</button></p>
+        <p class="hint sm basket-tip" v-if="basketRows.length">Tip: put <b>{{ quote.number }}</b> as the PO number at checkout, so the order can be matched to this quote.</p>
+      </template>
+      <template #footer>
+        <span class="basket-count muted sm" v-if="basketPicked.length">{{ basketPicked.length }} product{{ basketPicked.length === 1 ? '' : 's' }}, {{ basketItems }} item{{ basketItems === 1 ? '' : 's' }}</span>
+        <button class="btn" @click="basket = null">Cancel</button>
+        <a class="btn primary" :class="{ disabled: !basketLink }" :href="basketLink || undefined" :aria-disabled="!basketLink" target="_blank" rel="noopener" @click="basketOpened">Open Habitech basket</a>
       </template>
     </Modal></Transition>
 
@@ -2961,7 +3096,7 @@ const SettingsPage = {
         <label class="check"><input type="checkbox" v-model="s.display.showItemPrices"> Price of each item</label>
         <label class="check"><input type="checkbox" v-model="s.display.showSku"> Manufacturer and model numbers</label>
         <label class="check"><input type="checkbox" v-model="s.display.showLabourDetail"> Labour under each item</label>
-        <label class="check"><input type="checkbox" v-model="s.display.coverPage"> Separate cover page</label>
+        <label class="check"><input type="checkbox" v-model="s.display.frontCover"> Front cover (the house picture)</label>
       </div>
       <label class="inline-select">Labour
         <select v-model="s.display.labourPlacement">

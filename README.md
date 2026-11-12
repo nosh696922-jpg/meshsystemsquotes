@@ -170,6 +170,15 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
   searching for the name finds it. Quotes that already have it keep their
   name. To show only the name on proposals, untick **Manufacturer and model
   numbers** under **Pricing & terms → What the proposal shows**.
+- **Habitech basket** – on a quote with Habitech products, click **Add to
+  Habitech basket** (under the profit panel). Tick what to order and change
+  quantities if you need to (the quote isn't changed), then click **Open
+  Habitech basket**. Habitech's website opens in a new tab with them in your
+  basket, added to anything already there, and you check out as normal. Sign
+  in to Habitech in that browser first to see our prices. The same product in
+  several areas is ordered as one line. Products Habitech's website doesn't sell
+  (services, custom-made items, licences) are listed to order by phone or
+  email. Tip: use the quote number as the PO number at checkout.
 - **Labour** – Installation, Commissioning, Programming and Project management
   (add more in Settings). Add labour to any product as hours *per unit*, so it
   scales with quantity, or add a standalone labour line to an area.
@@ -197,6 +206,17 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
   area with one price per area. Each area ends with its own labour and services
   (Installation, Commissioning…, with a total for each), or choose “In one
   section after the areas” under **Pricing & terms → What the proposal shows**.
+- **Front cover** – new proposals start with our cover page (the house at
+  night, with the Client, Project, Date and Revision boxes filled in), then
+  the title, dates and price at the top of page 2. The boxes widen to fit
+  longer names. **Revision** counts the different versions sent to the
+  client: 1 for the first, 2 once you change it (and re-send it), and so on;
+  copying the link again without changes doesn't count. To fit a small quote on
+  fewer pages, untick **Front cover** under **Pricing & terms → What the
+  proposal shows**; for all new quotes, untick it in Settings. Quotes made
+  before the front cover keep their old look. The picture,
+  `public/img/proposal-cover.jpg`, was made from the designer's
+  `mesh-NewFC-210x297.pdf` (300 dpi, without its four white boxes).
 - **Two people** – if you both edit the same quote at once, the second person to
   save is warned and can load the other’s changes or keep their own.
 - **Look** – styled like the Mesh website, with a light and a dark mode (the
@@ -217,9 +237,11 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
 | `lib/catalogues/habitech.js` | Searches Habitech and checks prices through Habitech’s API |
 | `lib/env.js`, `.env.example` | Reads private settings from `.env` on your own computer |
 | `lib/proposal.js`, `public/proposal.css` | The client-facing proposal |
+| `public/img/proposal-cover.jpg` | The proposal's front cover picture |
 | `lib/client.js` | Client views and replies (accept, changes, decline) |
 | `lib/revisions.js`, `lib/kits.js` | Saved versions of quotes, and kits |
 | `lib/names.js` | Our own names for catalogue products |
+| `lib/habitech-basket.js` | Finds a quote's Habitech products on Habitech's website, for **Add to Habitech basket** |
 | `lib/pdf.js` | One-click PDF via Edge/Chrome (local only) |
 | `public/app.js`, `public/styles.css` | The quoting app |
 | `public/shared/calc.js` | Pricing maths, shared by app and proposal |
@@ -263,6 +285,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v4.2` | The Habitech tab lists every product (a copy of the whole list, refreshed nightly) with a brand filter and instant search, falling back to searching Habitech when nothing matches. Today’s price is checked when you add a Habitech product. Rolling back to `v4.1` goes back to search-only (the saved copy is simply ignored) |
 | `v4.3` | Use it like a program: the website can be installed as an app (own window and icon, from **Settings → Use it like a program**), and a Windows program, `MeshQuotes.exe`, can be downloaded from the same place. Rolling back to `v4.2` removes the install option and the download, but copies of the program people already have keep working |
 | `v4.4` | Sort products by price (low to high, high to low) or name, switches to hide graded stock and out-of-stock products, and our own names for catalogue products (e.g. UCG-Max added as “Home network router”). Rolling back to `v4.3` removes these; quote lines keep the names they were given, and the saved names come back when you move forward again |
+| `v4.5` | **Add to Habitech basket** on quotes (tick a quote's Habitech products and open Habitech's website with them in your basket), and the new **front cover** (the house picture with Client, Project, Date and Revision) on new proposals, replacing the old "Separate cover page". Rolling back to `v4.4` removes both: proposals start with their title again, and quotes that had the old separate cover page get it back |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s
@@ -286,6 +309,9 @@ and a quote marked “Changes requested” shows no status until you pick one.
   Habitech today may not be listed until tomorrow (search for its exact part
   code and, if the list has no match, the app finds it straight from Habitech). If Habitech’s API is down, the copy still works
   and quote lines keep their prices.
+- **Add to Habitech basket** uses a link that Habitech's website accepts, not
+  Habitech's API (which can only read, not fill a basket). If Habitech change
+  their website it may stop working; nothing else in the app is affected.
 - One shared team password, no individual accounts.
 - Quotes made on your own computer stay there; the online version starts empty.
 - Default labour rates and terms are placeholders – set your own in Settings.
