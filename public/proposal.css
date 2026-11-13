@@ -42,6 +42,13 @@
 @page {
   size: A4;
   margin: 15mm 15mm 17mm;
+  /* White margins even when printed from the Windows program, whose window
+     background is navy (it showed as a dark frame round every page). */
+  background: #fff;
+  /* Our own (empty) top margin, so the browser doesn't print its date and title there. */
+  @top-left { content: ''; }
+  @top-center { content: ''; }
+  @top-right { content: ''; }
   @bottom-left { font-family: Poppins, sans-serif; font-size: 7.5pt; color: #7d8798; }
   @bottom-right { content: counter(page) " / " counter(pages); font-family: Poppins, sans-serif; font-size: 7.5pt; color: #7d8798; }
 }
@@ -347,6 +354,7 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   display: flex; gap: 6mm; align-items: center;
   margin-top: 9mm; padding-top: 4mm; border-top: 1px solid var(--line);
   font-size: 8pt; color: var(--muted); break-inside: avoid;
+  break-before: avoid; /* goes with the Acceptance section, never on a page of its own */
 }
 .doc-footer img { width: 18mm; height: auto; flex: none; }
 

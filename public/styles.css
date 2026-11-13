@@ -446,6 +446,48 @@ label.check input { margin-top: 3px; }
 .tabs button.active { color: var(--ink); border-bottom-color: var(--blue); }
 .tabs .count { font-family: var(--font-body); font-size: 11px; font-weight: 600; background: var(--line-soft); border-radius: 99px; padding: 1px 8px; margin-left: 5px; color: var(--muted); }
 
+/* Catalogue tab bar (TabBar in app.js): drag tabs to move them; "More" holds the ones that don't fit. */
+.tab-bar { position: relative; margin-bottom: 18px; }
+.tab-bar > .tabs { margin-bottom: 0; }
+.tab-ruler { position: absolute; left: 0; top: 0; width: max-content; height: 0; margin: 0; border: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.tabs button.dragging { opacity: 0.45; }
+.tabs button.drop-before { box-shadow: inset 2px 0 0 var(--blue); }
+.tabs button.drop-after { box-shadow: inset -2px 0 0 var(--blue); }
+/* A small chevron drawn with two borders. */
+.tab-caret {
+  display: inline-block; width: 6px; height: 6px; margin: 0 2px 0 8px; vertical-align: 0.2em;
+  border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor;
+  transform: rotate(45deg); transition: transform 0.2s var(--ease);
+}
+.tab-more.open .tab-caret { transform: translateY(3px) rotate(225deg); }
+.tabs .tab-dots { padding-left: 12px; padding-right: 12px; font-size: 16px; line-height: 1; letter-spacing: 1px; }
+.tab-menu {
+  position: absolute; top: calc(100% + 6px); z-index: 30; min-width: 220px; max-width: 100%; padding: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-lg);
+}
+.tab-menu.arranging { width: 290px; padding: 12px 12px 10px; }
+.tm-item {
+  display: flex; align-items: center; width: 100%; padding: 8px 10px; border: none; border-radius: 9px; background: none;
+  font: inherit; font-size: 14px; font-weight: 500; color: var(--text); text-align: left; cursor: pointer;
+}
+.tm-item:hover { background: var(--panel-2); color: var(--ink); }
+.tm-item.active { color: var(--blue-text); }
+.tm-item .count { margin-left: auto; padding-left: 12px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.tm-arrange { color: var(--muted); }
+.tm-sep { height: 1px; background: var(--line); margin: 5px 4px; }
+.tm-title { font-family: var(--font-head); font-size: 14px; font-weight: 600; color: var(--ink); }
+.tm-hint { font-size: 12px; color: var(--muted); margin: 3px 0 8px; }
+.tm-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+.tm-list li { display: flex; align-items: center; gap: 6px; padding: 5px 2px; border-top: 1px solid var(--line-soft); }
+.tm-list li:first-child { border-top: none; }
+.tm-name { flex: 1; min-width: 0; font-size: 13.5px; color: var(--text); }
+.tm-move { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 13px; cursor: pointer; }
+.tm-move:hover:not(:disabled) { border-color: var(--blue); color: var(--blue-text); }
+.tm-move:disabled { opacity: 0.35; cursor: default; }
+.tm-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 10px; }
+.pop-enter-active, .pop-leave-active { transition: opacity 0.15s ease, transform 0.15s var(--ease); }
+.pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(-4px); }
+
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip {
   font: inherit; font-size: 13px; font-weight: 500; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 99px;
@@ -855,6 +897,12 @@ td .stock { margin-top: 3px; }
 /* ---- Products / settings ----------------------------------------------------- */
 
 .source-card { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+@media (max-width: 760px) {
+  /* On phones the button goes under the text instead of off the edge. */
+  .source-card { flex-direction: column; align-items: stretch; }
+  .source-card > .btn { align-self: flex-start; }
+  .trade-discount label { flex-wrap: wrap; }
+}
 .trade-discount { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
 .trade-discount label { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; color: var(--ink); }
 .pct-input { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }

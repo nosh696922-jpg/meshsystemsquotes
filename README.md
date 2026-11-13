@@ -179,6 +179,11 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
   **Hide out of stock** (sold out at Ubiquiti or Sonos, out of stock at
   Habitech). Each switch shows how many products it hides, and each computer
   remembers the choices.
+- **Your own tab order** – drag the catalogue tabs (Ubiquiti, Sonos, NetXL…)
+  along the bar in **Add product** or on the Products page, or use **More** (or
+  **⋯**) → **Arrange tabs**, which works on phones too. Tabs that don't fit go
+  under **More**. Each computer remembers its own order, the same on both
+  screens, and opens on the first tab. **Reset to the usual order** puts it back.
 - **Our own product names** – give a catalogue product the name clients
   should see, e.g. the Ubiquiti UCG-Max as “Home network router”. Rename a line
   on a quote and click **Always use this name for this product**, or use
@@ -311,6 +316,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v4.4` | Sort products by price (low to high, high to low) or name, switches to hide graded stock and out-of-stock products, and our own names for catalogue products (e.g. UCG-Max added as “Home network router”). Rolling back to `v4.3` removes these; quote lines keep the names they were given, and the saved names come back when you move forward again |
 | `v4.5` | **Add to Habitech basket** on quotes (tick a quote's Habitech products and open Habitech's website with them in your basket), and the new **front cover** (the house picture with Client, Project, Date and Revision) on new proposals, replacing the old "Separate cover page". Rolling back to `v4.4` removes both: proposals start with their title again, and quotes that had the old separate cover page get it back |
 | `v4.6` | The NetXL catalogue (needs `NETXL_API_KEY` in Vercel). Proposals: a line between each area, and the investment summary shows only the totals (no equipment and labour breakdown). The Quotes page loses its old “Ubiquiti UK catalogue” subheading. Rolling back to `v4.5` hides NetXL products (quote lines already added keep their prices) and brings the rest back; nothing is lost |
+| `v4.7` | Printed proposals: white page margins even when printed from the Windows program (they were dark navy), no browser date and title line at the top, and the company footer never on a page of its own. Catalogue tabs can be dragged into your own order, with a **More** menu for those that don't fit. Rolling back to `v4.6` brings back the old print and fixed tabs; the saved tab order is just ignored |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s

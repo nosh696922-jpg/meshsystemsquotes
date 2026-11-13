@@ -548,6 +548,250 @@ const Modal = {
     </div>`,
 };
 
+// ---- Catalogue tab bar (Add product and the Products page) ---------------------
+// Drag a tab to move it; tabs that don't fit go under "More". Each computer
+// remembers its own order (like the sort and hide switches), the same on both screens.
+
+const TAB_ORDER_KEY = 'mesh.tabOrder';
+function readTabOrder() {
+  try {
+    const ids = JSON.parse(storageGet(TAB_ORDER_KEY) || '[]');
+    return Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+const tabOrder = reactive({ ids: readTabOrder() });
+function saveTabOrder(ids) {
+  tabOrder.ids = ids;
+  try {
+    if (ids.length) localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(ids));
+    else localStorage.removeItem(TAB_ORDER_KEY);
+  } catch {
+    /* private mode etc. */
+  }
+}
+// Tabs in this computer's order. Tabs it hasn't placed yet (a new catalogue) go last.
+function orderedTabs(tabs) {
+  const pos = new Map(tabOrder.ids.map((id, i) => [id, i]));
+  const placed = tabs.filter((t) => pos.has(t.id)).sort((a, b) => pos.get(a.id) - pos.get(b.id));
+  return [...placed, ...tabs.filter((t) => !pos.has(t.id))];
+}
+// The tab a screen opens on: the first in this computer's order.
+const firstTab = (ids) => orderedTabs(ids.map((id) => ({ id })))[0]?.id;
+
+const TabBar = {
+  props: {
+    tabs: { type: Array, required: true }, // [{ id, label, count }]
+    modelValue: { type: String, default: '' },
+  },
+  emits: ['update:modelValue'],
+  data: () => ({ fit: Infinity, menu: false, arranging: false, menuLeft: 0, dragId: null, dropAt: null }),
+  computed: {
+    ordered() {
+      return orderedTabs(this.tabs);
+    },
+    shown() {
+      return this.ordered.slice(0, this.fit);
+    },
+    hidden() {
+      return this.ordered.slice(this.fit);
+    },
+    activeHidden() {
+      return this.hidden.find((t) => t.id === this.modelValue) || null;
+    },
+    // Re-measure when a tab's label or count changes.
+    sizeKey() {
+      return this.ordered.map((t) => `${t.id}:${t.label}:${t.count ?? ''}`).join('|');
+    },
+  },
+  watch: {
+    sizeKey() {
+      this.$nextTick(this.measure);
+    },
+    modelValue() {
+      this.$nextTick(this.measure);
+    },
+  },
+  mounted() {
+    this.sizes = new ResizeObserver(() => this.measure());
+    this.sizes.observe(this.$el);
+    this.measure();
+    document.fonts?.ready.then(() => this.measure());
+    this.onDown = (e) => {
+      if (this.menu && !this.$el.contains(e.target)) this.closeMenu();
+    };
+    // Escape closes the menu (and not the Add product window around it).
+    this.onKey = (e) => {
+      if (e.key === 'Escape' && this.menu) {
+        e.stopPropagation();
+        this.closeMenu();
+      }
+    };
+    document.addEventListener('mousedown', this.onDown);
+    document.addEventListener('keydown', this.onKey);
+  },
+  unmounted() {
+    this.sizes.disconnect();
+    document.removeEventListener('mousedown', this.onDown);
+    document.removeEventListener('keydown', this.onKey);
+  },
+  methods: {
+    // How many tabs fit, leaving room for the More button.
+    measure() {
+      const bar = this.$refs.bar;
+      const ruler = this.$refs.ruler;
+      if (!bar || !ruler) return;
+      const room = bar.clientWidth;
+      const widths = [...ruler.querySelectorAll('[data-tab]')].map((b) => b.offsetWidth);
+      const more = ruler.querySelector('.ruler-more').offsetWidth;
+      const caret = more - ruler.querySelector('.ruler-plain').offsetWidth; // what the ▾ adds
+      const dots = ruler.querySelector('.ruler-dots').offsetWidth;
+      const gap = 2;
+      const width = (n) => widths.slice(0, n).reduce((s, w) => s + w, 0) + gap * n;
+      if (width(widths.length) + dots <= room) {
+        this.fit = widths.length;
+        return;
+      }
+      const fitting = (reserve) => {
+        let n = widths.length;
+        while (n > 1 && width(n) + reserve > room) n--;
+        return n;
+      };
+      let n = fitting(more);
+      const active = this.ordered.findIndex((t) => t.id === this.modelValue);
+      if (active >= n) n = fitting(Math.max(more, widths[active] + caret)); // More shows the active tab's name
+      this.fit = n;
+    },
+    select(id) {
+      this.$emit('update:modelValue', id);
+      this.closeMenu();
+    },
+    toggleMenu() {
+      if (this.menu) return this.closeMenu();
+      this.menu = true;
+      this.arranging = false;
+      this.$nextTick(this.placeMenu);
+    },
+    // Line the menu up under the More button, inside the bar.
+    placeMenu() {
+      const btn = this.$refs.more;
+      const menu = this.$refs.menu;
+      if (!btn || !menu) return;
+      const right = btn.offsetLeft - this.$refs.bar.scrollLeft + btn.offsetWidth;
+      this.menuLeft = Math.max(0, Math.min(right - menu.offsetWidth, this.$el.clientWidth - menu.offsetWidth));
+    },
+    closeMenu() {
+      this.menu = false;
+      this.arranging = false;
+    },
+    arrange() {
+      this.arranging = true;
+      this.$nextTick(this.placeMenu);
+    },
+    // Save this bar's order; tabs only the other screen has (One-off item) keep their place after.
+    save(ids) {
+      saveTabOrder([...ids, ...tabOrder.ids.filter((id) => !ids.includes(id))]);
+    },
+    move(id, to) {
+      const ids = this.ordered.map((t) => t.id).filter((x) => x !== id);
+      ids.splice(Math.max(0, Math.min(ids.length, to)), 0, id);
+      this.save(ids);
+    },
+    reset() {
+      saveTabOrder([]);
+    },
+    dragStart(e, id) {
+      this.dragId = id;
+      e.dataTransfer.effectAllowed = 'move';
+      try {
+        e.dataTransfer.setData('text/plain', id);
+      } catch {
+        /* some browsers only allow it during dragstart */
+      }
+    },
+    dragOver(e, id) {
+      if (!this.dragId || this.dragId === id) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const r = e.currentTarget.getBoundingClientRect();
+      this.dropAt = `${id}:${e.clientX < r.left + r.width / 2 ? 'before' : 'after'}`;
+    },
+    dragLeave(id) {
+      if (this.dropAt && this.dropAt.startsWith(`${id}:`)) this.dropAt = null;
+    },
+    drop(e, id) {
+      e.preventDefault();
+      const dragId = this.dragId;
+      const after = this.dropAt === `${id}:after`;
+      this.dragEnd();
+      if (!dragId || dragId === id) return;
+      const ids = this.ordered.map((t) => t.id).filter((x) => x !== dragId);
+      ids.splice(ids.indexOf(id) + (after ? 1 : 0), 0, dragId);
+      this.save(ids);
+    },
+    // Dropping a tab on More puts it last (under More, if the bar is full).
+    dragOverMore(e) {
+      if (!this.dragId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.dropAt = 'more';
+    },
+    dropOnMore(e) {
+      e.preventDefault();
+      const dragId = this.dragId;
+      this.dragEnd();
+      if (dragId) this.move(dragId, this.ordered.length - 1);
+    },
+    dragEnd() {
+      this.dragId = null;
+      this.dropAt = null;
+    },
+  },
+  template: `
+  <div class="tab-bar">
+    <nav class="tabs" ref="bar" v-tab-ink>
+      <button v-for="t in shown" :key="t.id" type="button" draggable="true" title="Drag to move this tab"
+        :class="{ active: modelValue === t.id, dragging: dragId === t.id, 'drop-before': dropAt === t.id + ':before', 'drop-after': dropAt === t.id + ':after' }"
+        @click="select(t.id)" @dragstart="dragStart($event, t.id)" @dragover="dragOver($event, t.id)" @dragleave="dragLeave(t.id)" @drop="drop($event, t.id)" @dragend="dragEnd">{{ t.label }}<span class="count" v-if="t.count != null">{{ t.count }}</span></button>
+      <button v-if="hidden.length" ref="more" type="button" class="tab-more" :class="{ active: Boolean(activeHidden), open: menu, 'drop-before': dropAt === 'more' }"
+        aria-haspopup="true" :aria-expanded="menu ? 'true' : 'false'" @click="toggleMenu" @dragover="dragOverMore" @dragleave="dropAt = null" @drop="dropOnMore">{{ activeHidden ? activeHidden.label : 'More' }}<span class="count" v-if="activeHidden && activeHidden.count != null">{{ activeHidden.count }}</span><span class="tab-caret" aria-hidden="true"></span></button>
+      <button v-else ref="more" type="button" class="tab-dots" title="Arrange tabs" aria-label="Arrange tabs" aria-haspopup="true" :aria-expanded="menu ? 'true' : 'false'" @click="toggleMenu">⋯</button>
+    </nav>
+    <Transition name="pop">
+      <div v-if="menu" ref="menu" class="tab-menu" :class="{ arranging }" :style="{ left: menuLeft + 'px' }">
+        <template v-if="!arranging">
+          <button v-for="t in hidden" :key="t.id" type="button" class="tm-item" :class="{ active: modelValue === t.id }" draggable="true"
+            @click="select(t.id)" @dragstart="dragStart($event, t.id)" @dragend="dragEnd">{{ t.label }}<span class="count" v-if="t.count != null">{{ t.count }}</span></button>
+          <div class="tm-sep" v-if="hidden.length"></div>
+          <button type="button" class="tm-item tm-arrange" @click="arrange">Arrange tabs…</button>
+        </template>
+        <template v-else>
+          <div class="tm-title">Arrange tabs</div>
+          <p class="tm-hint">Use the arrows, or drag tabs along the bar. This computer remembers the order.</p>
+          <ol class="tm-list">
+            <li v-for="(t, i) in ordered" :key="t.id">
+              <span class="tm-name">{{ t.label }}</span>
+              <button type="button" class="tm-move" :disabled="i === 0" @click="move(t.id, i - 1)" :aria-label="'Move ' + t.label + ' earlier'">↑</button>
+              <button type="button" class="tm-move" :disabled="i === ordered.length - 1" @click="move(t.id, i + 1)" :aria-label="'Move ' + t.label + ' later'">↓</button>
+            </li>
+          </ol>
+          <div class="tm-foot">
+            <button type="button" class="link sm" @click="reset">Reset to the usual order</button>
+            <button type="button" class="btn sm" @click="closeMenu">Done</button>
+          </div>
+        </template>
+      </div>
+    </Transition>
+    <div class="tabs tab-ruler" ref="ruler" aria-hidden="true">
+      <button v-for="t in ordered" :key="t.id" :data-tab="t.id" tabindex="-1">{{ t.label }}<span class="count" v-if="t.count != null">{{ t.count }}</span></button>
+      <button class="ruler-more" tabindex="-1">More<span class="tab-caret"></span></button>
+      <button class="ruler-plain" tabindex="-1">More</button>
+      <button class="ruler-dots tab-dots" tabindex="-1">⋯</button>
+    </div>
+  </div>`,
+};
+
 // ---- Product search (used by the picker and the products page) -----------
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -848,12 +1092,16 @@ const liveSearchMixin = {
     isLive(on) {
       if (on) this.queueLiveSearch(0);
     },
-    tab() {
-      if (!this.isLiveTab) return;
-      loadLiveStatus(this.tab);
-      loadLiveCopy(this.tab);
-      this.live = { ...BLANK_LIVE };
-      if (this.isLive) this.queueLiveSearch(0);
+    // Also when the screen opens, which can be on Habitech now tabs can be moved.
+    tab: {
+      immediate: true,
+      handler() {
+        if (!this.isLiveTab) return;
+        loadLiveStatus(this.tab);
+        loadLiveCopy(this.tab);
+        this.live = { ...BLANK_LIVE };
+        if (this.isLive) this.queueLiveSearch(0);
+      },
     },
   },
   beforeUnmount() {
@@ -923,7 +1171,7 @@ const ProductPicker = {
   emits: ['add', 'close'],
   data() {
     return {
-      tab: 'ubiquiti',
+      tab: firstTab([...catalogueSources().map((s) => s.id), 'custom', 'kits', 'manual']) || 'ubiquiti',
       q: '',
       category: '',
       variants: {},
@@ -939,6 +1187,15 @@ const ProductPicker = {
       return state.catalogue;
     },
     catalogues: () => catalogueSources(),
+    // The tab bar: each catalogue, Our products, Kits and One-off item.
+    tabList() {
+      return [
+        ...this.catalogues.map((s) => ({ id: s.id, label: s.label })),
+        { id: 'custom', label: 'Our products' },
+        { id: 'kits', label: 'Kits', count: this.kitsLoaded ? this.kits.length : null },
+        { id: 'manual', label: 'One-off item' },
+      ];
+    },
     // The catalogue on the current tab (Ubiquiti, Sonos, Crestron), if any.
     source() {
       return this.catalogues.find((s) => s.id === this.tab) || null;
@@ -1092,12 +1349,7 @@ const ProductPicker = {
   template: `
   <Modal :title="'Add to ' + (sectionName || 'area')" wide @close="$emit('close')">
     <div class="picker">
-      <div class="tabs" v-tab-ink>
-        <button v-for="s in catalogues" :key="s.id" :class="{ active: tab === s.id }" @click="tab = s.id">{{ s.label }}</button>
-        <button :class="{ active: tab === 'custom' }" @click="tab = 'custom'">Our products</button>
-        <button :class="{ active: tab === 'kits' }" @click="tab = 'kits'">Kits <span class="count" v-if="kitsLoaded">{{ kits.length }}</span></button>
-        <button :class="{ active: tab === 'manual' }" @click="tab = 'manual'">One-off item</button>
-      </div>
+      <TabBar :tabs="tabList" v-model="tab" />
 
       <template v-if="tab === 'kits'">
         <input ref="search" class="search" type="search" v-model="q" placeholder="Search kits">
@@ -2509,13 +2761,22 @@ const ProductsPage = {
   components: { MoneyInput, Modal },
   mixins: [liveSearchMixin, productListMixin],
   data() {
-    return { tab: 'ubiquiti', q: '', category: '', limit: 60, editing: null, kitEditing: null, naming: null };
+    return { tab: firstTab([...catalogueSources().map((s) => s.id), 'custom', 'kits']) || 'ubiquiti', q: '', category: '', limit: 60, editing: null, kitEditing: null, naming: null };
   },
   computed: {
     cat() {
       return state.catalogue;
     },
     catalogues: () => catalogueSources(),
+    // The tab bar: each catalogue with its count, then Our products and Kits.
+    tabList() {
+      const count = (n) => (n == null ? null : n.toLocaleString('en-GB'));
+      return [
+        ...this.catalogues.map((s) => ({ id: s.id, label: s.tabName, count: count(this.countOf(s.id)) })),
+        { id: 'custom', label: 'Our products', count: count(this.cat.products.filter((p) => p.source === 'custom').length) },
+        { id: 'kits', label: 'Kits', count: this.kitsLoaded ? count(this.kits.length) : null },
+      ];
+    },
     // The catalogue on the current tab (Ubiquiti, Sonos, Crestron), if any.
     source() {
       return this.catalogues.find((s) => s.id === this.tab) || null;
@@ -2690,11 +2951,7 @@ const ProductsPage = {
       <button v-if="tab === 'custom'" class="btn primary lg" @click="newProduct">+ Add product</button>
     </div>
 
-    <nav class="tabs" v-tab-ink>
-      <button v-for="s in catalogues" :key="s.id" :class="{ active: tab === s.id }" @click="tab = s.id">{{ s.tabName }} <span class="count" v-if="countOf(s.id) != null">{{ countOf(s.id).toLocaleString('en-GB') }}</span></button>
-      <button :class="{ active: tab === 'custom' }" @click="tab = 'custom'">Our products <span class="count">{{ cat.products.filter(p => p.source === 'custom').length }}</span></button>
-      <button :class="{ active: tab === 'kits' }" @click="tab = 'kits'">Kits <span class="count" v-if="kitsLoaded">{{ kits.length }}</span></button>
-    </nav>
+    <TabBar :tabs="tabList" v-model="tab" />
 
     <template v-if="tab === 'kits'">
       <p class="hint">Kits are groups of items and labour you use often, such as a standard WiFi room. To make one, build an area on a quote and click <b>Save as kit</b> under it. To use one, click <b>+ Add product</b> on a quote and open <b>Kits</b>.</p>
@@ -3269,7 +3526,9 @@ const tabInk = {
   },
   updated(el) {
     const ink = el._ink;
-    if (ink && ink.watch()) ink.place(false);
+    if (!ink) return;
+    ink.watch();
+    ink.place(false); // also when the active tab has moved (tabs can be dragged)
   },
   unmounted(el) {
     if (el._ink) el._ink.sizes.disconnect();
@@ -3362,5 +3621,6 @@ const App = {
 const app = createApp(App);
 app.component('MeshBand', MeshBand);
 app.component('AnimatedNumber', AnimatedNumber);
+app.component('TabBar', TabBar);
 app.directive('tab-ink', tabInk);
 app.mount('#app');
