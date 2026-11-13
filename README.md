@@ -32,6 +32,15 @@ with the key as its value, tick **Sensitive**, and redeploy. The key stays on
 the server; nobody using the app can see it. Never put it in the code or send
 it in chat or email. If it leaks, ask Habitech for a new one.
 
+### Connecting NetXL
+
+Make an API key in NetXL: **netxl.com → My Account → Trade & API** (it's 64
+characters and shown only once). In Vercel, open **Settings → Environment
+Variables**, add `NETXL_API_KEY` with the key as its value, tick **Sensitive**,
+and redeploy. On your own computer, put it in the `.env` file. Never put it in
+the code or send it in chat or email. If it leaks, delete it in NetXL and make a
+new one.
+
 ### Sharing a proposal with a client
 
 Open a quote and click **Copy client link**. Anyone with that link can *view*
@@ -154,6 +163,14 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
   maker's part number, not Habitech's stock code. Products Habitech hasn't
   priced for us aren't listed (email Habitech to add the brand). Needs the
   Habitech API key (see *Connecting Habitech*).
+- **NetXL catalogue** – our NetXL trade account (about 4,300 networking and
+  phone products), read through NetXL's API and copied once a day (or click
+  **Refresh prices now** on **Products → NetXL**). The price is NetXL's RRP (our
+  cost where it has none) and our cost is our account's price for one unit,
+  both ex VAT. Stock and the next delivery date show on each product and on
+  quote lines, as of the last copy. NetXL's refurbished products count as
+  graded stock, so **Hide graded stock** hides them. Needs the NetXL API key
+  (see *Connecting NetXL*).
 - **Other manufacturers** – add a one-off item while quoting, or save products
   to **Our products** to reuse them.
 - **Sorting and hiding** – in **Add product** and on the Products page, sort by
@@ -206,6 +223,10 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
   area with one price per area. Each area ends with its own labour and services
   (Installation, Commissioning…, with a total for each), or choose “In one
   section after the areas” under **Pricing & terms → What the proposal shows**.
+  A line (starting in Mesh blue) separates each area from the next. The
+  **Investment summary** shows only the total excluding VAT, the VAT and the
+  total including VAT, plus the whole-quote discount (e.g. “Package saving”)
+  when there is one.
 - **Front cover** – new proposals start with our cover page (the house at
   night, with the Client, Project, Date and Revision boxes filled in), then
   the title, dates and price at the top of page 2. The boxes widen to fit
@@ -235,6 +256,7 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
 | `lib/catalogues/sonos.js` | Reads the Sonos UK shop |
 | `lib/catalogues/crestron.js`, `lib/xlsx.js` | Imports Crestron’s dealer price list (.xlsx) |
 | `lib/catalogues/habitech.js` | Searches Habitech and checks prices through Habitech’s API |
+| `lib/catalogues/netxl.js` | Copies the NetXL catalogue daily through NetXL’s API |
 | `lib/env.js`, `.env.example` | Reads private settings from `.env` on your own computer |
 | `lib/proposal.js`, `public/proposal.css` | The client-facing proposal |
 | `public/img/proposal-cover.jpg` | The proposal's front cover picture |
@@ -255,7 +277,9 @@ Create a file in `lib/catalogues/`, then list it in `lib/catalogue.js`:
 
 - **Read from a website** (like `ubiquiti.js`, `sonos.js`): export
   `{ id, name, label, tabName, site, sync() }`, where `sync()` returns products
-  in the same shape, and add it to `SOURCES`. It refreshes daily.
+  in the same shape, and add it to `SOURCES`. It refreshes daily. A supplier
+  whose API returns its whole catalogue quickly (like `netxl.js`) works the same
+  way; add `configured()` and `keyName` so it waits until its key is set up.
 - **Imported from a price list file** (like `crestron.js`): export
   `{ id, name, label, tabName, importFile(buffer, fileName) }` and add it to
   `IMPORTED`. `lib/xlsx.js` reads Excel files.
@@ -286,6 +310,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v4.3` | Use it like a program: the website can be installed as an app (own window and icon, from **Settings → Use it like a program**), and a Windows program, `MeshQuotes.exe`, can be downloaded from the same place. Rolling back to `v4.2` removes the install option and the download, but copies of the program people already have keep working |
 | `v4.4` | Sort products by price (low to high, high to low) or name, switches to hide graded stock and out-of-stock products, and our own names for catalogue products (e.g. UCG-Max added as “Home network router”). Rolling back to `v4.3` removes these; quote lines keep the names they were given, and the saved names come back when you move forward again |
 | `v4.5` | **Add to Habitech basket** on quotes (tick a quote's Habitech products and open Habitech's website with them in your basket), and the new **front cover** (the house picture with Client, Project, Date and Revision) on new proposals, replacing the old "Separate cover page". Rolling back to `v4.4` removes both: proposals start with their title again, and quotes that had the old separate cover page get it back |
+| `v4.6` | The NetXL catalogue (needs `NETXL_API_KEY` in Vercel). Proposals: a line between each area, and the investment summary shows only the totals (no equipment and labour breakdown). The Quotes page loses its old “Ubiquiti UK catalogue” subheading. Rolling back to `v4.5` hides NetXL products (quote lines already added keep their prices) and brings the rest back; nothing is lost |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s
@@ -305,6 +330,8 @@ and a quote marked “Changes requested” shows no status until you pick one.
 - Ubiquiti and Sonos data is read from their shops’ public pages. If either
   changes their site, or blocks requests from Vercel’s servers, the price refresh
   stops working (the last good copy is kept and the Products page shows the error).
+- NetXL prices and stock are copied once a day, so stock shown on a quote can
+  be up to a day old; NetXL's website has the live figure.
 - The Habitech list is a copy, refreshed nightly, so a product added to
   Habitech today may not be listed until tomorrow (search for its exact part
   code and, if the list has no match, the app finds it straight from Habitech). If Habitech’s API is down, the copy still works

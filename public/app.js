@@ -355,6 +355,7 @@ const formatDay = (iso) => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString
 const KNOWN_CATALOGUES = [
   { id: 'ubiquiti', label: 'Ubiquiti', tabName: 'Ubiquiti UK store', kind: 'web' },
   { id: 'sonos', label: 'Sonos', tabName: 'Sonos UK shop', kind: 'web' },
+  { id: 'netxl', label: 'NetXL', tabName: 'NetXL', kind: 'web' },
   { id: 'crestron', label: 'Crestron', tabName: 'Crestron price list', kind: 'import' },
   { id: 'habitech', label: 'Habitech', tabName: 'Habitech', kind: 'live' },
 ];
@@ -368,6 +369,7 @@ const SEARCH_HINTS = {
   sonos: 'Search Sonos, e.g. Arc Ultra, Era 100, Sub Mini, Amp',
   crestron: 'Search Crestron models, e.g. TSW-1070, DM-NVX, HZ2',
   habitech: 'Search Habitech by name, brand or part code, e.g. VX66R, HDMI cable, Sonance',
+  netxl: 'Search NetXL by name, brand or part code, e.g. UDM-Pro, PoE switch, Grandstream',
   custom: 'Search our products',
 };
 
@@ -600,9 +602,10 @@ const productView = reactive({
 });
 
 // Graded, ex-display or refurbished stock. Habitech starts these names with
-// "Grade A -", "Graded B:" or "GRADED".
+// "Grade A -", "Graded B:" or "GRADED"; NetXL marks its refurbished
+// ("reduced") products, which the server passes on as `graded`.
 const GRADED = /^\s*graded?\b|\b(?:ex[- ]?display|ex[- ]?demo|b[- ]?stock|open[- ]?box|refurbished|pre[- ]?owned)\b/i;
-const isGraded = (p) => GRADED.test(p.name || '');
+const isGraded = (p) => p.graded === true || GRADED.test(p.name || '');
 
 // Every option is sold out (Ubiquiti, Sonos) or out of stock (Habitech).
 function isOutOfStock(p) {
@@ -1144,7 +1147,9 @@ const ProductPicker = {
         </p>
 
         <p class="picker-meta" v-if="source && source.kind === 'web'">
-          <template v-if="cat.syncing === source.id || source.syncing">Updating from the {{ source.tabName }}…</template>
+          <template v-if="source.configured === false">{{ source.label }} isn’t connected yet. Add our {{ source.label }} API key as <b>{{ source.keyName }}</b> in Vercel → Settings → Environment Variables, then redeploy.</template>
+          <template v-else-if="cat.syncing === source.id || source.syncing">Updating from {{ source.keyName ? source.label : 'the ' + source.tabName }}…</template>
+          <template v-else-if="source.fetchedAt && source.keyName">{{ source.label }} RRP and our account price, ex VAT · updated {{ timeAgo(source.fetchedAt) }}</template>
           <template v-else-if="source.fetchedAt">Prices from the {{ source.tabName }}, ex VAT · updated {{ timeAgo(source.fetchedAt) }}<template v-if="tradeDiscountText"> · {{ tradeDiscountText }}</template></template>
           <template v-else-if="cat.loaded">No {{ source.label }} prices yet — refresh on the Products page.</template>
         </p>
@@ -1153,7 +1158,7 @@ const ProductPicker = {
         </p>
 
         <div v-if="isLiveTab && source.configured === false" class="empty">
-          {{ source.label }} isn’t connected yet. Add the API key from {{ source.label }} as <b>HABITECH_API_KEY</b> in Vercel → Settings → Environment Variables, then redeploy.
+          {{ source.label }} isn’t connected yet. Add the API key from {{ source.label }} as <b>{{ source.keyName || 'HABITECH_API_KEY' }}</b> in Vercel → Settings → Environment Variables, then redeploy.
         </div>
         <div v-else-if="copyLoading" class="empty loading">Loading {{ source.label }} products…</div>
         <div v-else-if="isLive && live.error" class="empty error-text">{{ live.error }}</div>
@@ -1326,7 +1331,6 @@ const QuotesList = {
       <div>
         <p class="eyebrow">Proposals</p>
         <h1>Quotes</h1>
-        <p class="muted">Build proposals from the Ubiquiti UK catalogue and your own products.</p>
       </div>
       <button class="btn primary lg" @click="create">+ New quote</button>
     </div>
@@ -1885,8 +1889,9 @@ const QuoteEditor = {
         }
       }
     },
+    // Stock on a quote line: today's for Habitech, the daily copy's for NetXL.
     liveStock(item) {
-      return isLiveSource(item.source) ? stockText(this.livePrices[priceKey(item)]) : '';
+      return stockText(this.priceIndex[priceKey(item)]);
     },
 
     // Our own names for catalogue products (Our products are renamed on the
@@ -1920,7 +1925,7 @@ const QuoteEditor = {
       }
     },
     liveStockLevel(item) {
-      return this.livePrices[priceKey(item)]?.stock || '';
+      return this.priceIndex[priceKey(item)]?.stock || '';
     },
 
     // Add to Habitech basket: find each product on Habitech's website, then
@@ -2718,15 +2723,23 @@ const ProductsPage = {
       </div>
     </template>
 
-    <!-- Read from the maker's website (Ubiquiti, Sonos) -->
-    <div class="card source-card" v-if="source && source.kind === 'web'">
+    <!-- Copied once a day: from the maker's website (Ubiquiti, Sonos) or a supplier's API (NetXL) -->
+    <div class="card source-card" v-if="source && source.kind === 'web' && source.configured === false">
       <div>
-        <div class="strong">{{ (source.count || 0).toLocaleString('en-GB') }} products from <a :href="source.sourceUrl || '#'" target="_blank" rel="noopener">{{ source.site || source.tabName }}</a></div>
-        <div class="muted sm" v-if="busy">Updating from the {{ source.label }} website{{ source.id === 'ubiquiti' ? ' — this takes about 10 seconds' : '' }}…</div>
+        <div class="strong">{{ source.label }} isn’t connected yet</div>
+        <div class="muted sm">Add our API key from {{ source.label }}<template v-if="source.id === 'netxl'"> (netxl.com → My Account → Trade &amp; API)</template> as <b>{{ source.keyName }}</b> in Vercel → Settings → Environment Variables (tick <b>Sensitive</b>), then redeploy. On your own computer, it goes in the <b>.env</b> file in the app’s folder.</div>
+      </div>
+    </div>
+    <div class="card source-card" v-else-if="source && source.kind === 'web'">
+      <div>
+        <div class="strong">{{ (source.count || 0).toLocaleString('en-GB') }} products from <template v-if="source.keyName">our trade account at </template><a :href="source.sourceUrl || '#'" target="_blank" rel="noopener">{{ source.site || source.tabName }}</a></div>
+        <div class="muted sm" v-if="busy">Updating from {{ source.keyName ? source.label : 'the ' + source.label + ' website' }}{{ source.id === 'ubiquiti' ? ' — this takes about 10 seconds' : '' }}…</div>
         <div class="muted sm" v-else-if="source.fetchedAt">
           Prices last updated {{ formatDateTime(source.fetchedAt) }} ({{ timeAgo(source.fetchedAt) }}). Refreshes automatically once a day. Prices exclude VAT<template v-if="source.id === 'sonos'"> (worked out from the shop’s prices, which include it)</template>.
           <template v-if="source.id === 'sonos' && discountValue('sonos') === ''"> The shop doesn’t show what we pay, so set our trade discount below (or type our cost on each quote line) for the profit figure.</template>
+          <template v-if="source.id === 'netxl'"> The price is NetXL’s RRP (or our cost, where it has none) and our cost is our account’s price for one unit. Stock is as of the last update.</template>
         </div>
+        <div class="muted sm" v-else-if="source.keyName">Not copied yet: click <b>Refresh prices now</b>. It takes a few seconds.</div>
         <div class="error-text sm" v-if="source.error">Last refresh had a problem: {{ source.error }}</div>
         <div class="trade-discount" v-if="discountField(source.id)">
           <label>Our trade discount
@@ -2763,7 +2776,7 @@ const ProductsPage = {
       <div>
         <template v-if="source.configured === false || (liveInfo && liveInfo.configured === false)">
           <div class="strong">{{ source.label }} isn’t connected yet</div>
-          <div class="muted sm">Add the API key from {{ source.label }} as <b>HABITECH_API_KEY</b> in Vercel → Settings → Environment Variables (tick <b>Sensitive</b>), then redeploy. On your own computer, it goes in the <b>.env</b> file in the app’s folder.</div>
+          <div class="muted sm">Add the API key from {{ source.label }} as <b>{{ source.keyName || 'HABITECH_API_KEY' }}</b> in Vercel → Settings → Environment Variables (tick <b>Sensitive</b>), then redeploy. On your own computer, it goes in the <b>.env</b> file in the app’s folder.</div>
         </template>
         <template v-else>
           <div class="strong">

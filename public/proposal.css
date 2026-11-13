@@ -209,6 +209,10 @@ body.web-mode { background: var(--paper); }
 .rich li::before { content: ''; position: absolute; left: 0.5mm; top: 0.62em; width: 1.5mm; height: 1.5mm; background: var(--blue); }
 
 .area { margin-top: 5mm; }
+/* A clear line between areas, so each one starts afresh: darker than the
+   table lines, starting with a short stretch of Mesh blue. */
+.area + .area { position: relative; margin-top: 8mm; padding-top: 6mm; border-top: 1.5px solid #c4bfb3; }
+.area + .area::before { content: ''; position: absolute; left: 0; top: -1.5px; width: 16mm; height: 1.5px; background: var(--blue); }
 .area h3 { font-size: 12pt; margin-bottom: 2mm; break-after: avoid; }
 .area h3::before { content: ''; display: inline-block; width: 2mm; height: 2mm; margin-right: 2.5mm; vertical-align: 0.15em; background: var(--blue); }
 .area-desc { margin-bottom: 3mm; color: var(--text); break-after: avoid; }
@@ -256,7 +260,7 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
 .area-total .grand { color: var(--ink); }
 
 /* "Area totals only" layout */
-.summary-area { padding-bottom: 3mm; border-bottom: 1px solid var(--line); }
+.summary-area { padding-bottom: 3mm; }
 .included { list-style: none; margin: 0 0 3mm; padding: 0; columns: 2; column-gap: 8mm; font-size: 9.5pt; }
 .included li { break-inside: avoid; padding: 0.8mm 0 0.8mm 4mm; position: relative; }
 .included li::before { content: ''; position: absolute; left: 0; top: 2.6mm; width: 1.4mm; height: 1.4mm; background: var(--blue); }
