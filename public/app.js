@@ -378,6 +378,7 @@ function parseRoute() {
   if (parts[0] === 'quote' && parts[1]) return { name: 'quote', id: parts[1] };
   if (parts[0] === 'products') return { name: 'products' };
   if (parts[0] === 'settings') return { name: 'settings' };
+  if (parts[0] === 'dev') return { name: 'dev' };
   return { name: 'quotes' };
 }
 window.addEventListener('hashchange', () => {
@@ -547,6 +548,38 @@ const Modal = {
       </div>
     </div>`,
 };
+
+// ---- Developer options ------------------------------------------------------------
+// Searching the secret word on the Habitech tab turns on the Dev page on this
+// computer. The code is public on GitHub, so only a fingerprint of the word is
+// kept here (SHA-256 of "mesh-dev:" + the word in lower case). The word hides
+// the page rather than locking it: the Dev page only does what the signed-in
+// team could already do, and its risky buttons need a word typed to confirm.
+
+const DEV_WORD_HASH = '798d5ea4b44d3921e9c347369a4797dd71f0b415414b4447681f85d76103ccc0';
+const DEV_KEY = 'mesh.devOptions';
+const devOptions = reactive({ on: storageGet(DEV_KEY) === '1' });
+
+function setDevOptions(on) {
+  devOptions.on = on;
+  try {
+    if (on) localStorage.setItem(DEV_KEY, '1');
+    else localStorage.removeItem(DEV_KEY);
+  } catch {
+    /* private mode etc. */
+  }
+}
+
+async function isDevWord(text) {
+  const word = String(text || '').trim().toLowerCase();
+  if (!DEV_WORD_HASH || word.length < 3 || !globalThis.crypto?.subtle) return false;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`mesh-dev:${word}`));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('') === DEV_WORD_HASH;
+}
+
+// What "Reset this computer" clears: its saved view choices. Not the light/dark
+// choice, who you are, or developer options.
+const RESET_KEYS = ['mesh.productSort', 'mesh.hideGraded', 'mesh.hideOutOfStock', 'mesh.tabOrder', 'mesh.hideProfit'];
 
 // ---- Catalogue tab bar (Add product and the Products page) ---------------------
 // Drag a tab to move it; tabs that don't fit go under "More". Each computer
@@ -891,6 +924,23 @@ function sortProducts(list, sort, priceOf) {
 // For a component with `matches` (searched list), `isLive` and `live` (direct
 // Habitech search) and a `sortPrice(product)` method.
 const productListMixin = {
+  // The secret word, searched on the Habitech tab, turns on developer options.
+  watch: {
+    q(value) {
+      if (this.tab !== 'habitech' || !value) return;
+      isDevWord(value).then((yes) => {
+        if (!yes || this.q !== value) return;
+        this.q = '';
+        setDevOptions(true);
+        if (this.$options.devOpensPage) {
+          toast('Developer options are on for this computer.');
+          location.hash = '#/dev';
+        } else {
+          toast('Developer options are on for this computer: open Dev at the top.');
+        }
+      });
+    },
+  },
   computed: {
     view: () => productView,
     SORTS: () => SORTS,
@@ -2760,6 +2810,7 @@ const QuoteEditor = {
 const ProductsPage = {
   components: { MoneyInput, Modal },
   mixins: [liveSearchMixin, productListMixin],
+  devOpensPage: true, // the secret word goes straight to the Dev page from here
   data() {
     return { tab: firstTab([...catalogueSources().map((s) => s.id), 'custom', 'kits']) || 'ubiquiti', q: '', category: '', limit: 60, editing: null, kitEditing: null, naming: null };
   },
@@ -3412,6 +3463,227 @@ const SettingsPage = {
 
 // ---- The light switch ---------------------------------------------------------------
 
+// ---- Developer options page -------------------------------------------------------
+
+const JOB_NAMES = {
+  nightly: 'Run the nightly job now',
+  'refresh-all': 'Refresh every catalogue',
+};
+
+const DevPage = {
+  data: () => ({
+    info: null,
+    loading: false,
+    error: null,
+    tests: {},
+    testing: {},
+    confirms: { nightly: '', 'refresh-all': '' },
+    running: null,
+    lastRun: null,
+    resetText: '',
+  }),
+  computed: {
+    on: () => devOptions.on,
+    JOB_NAMES: () => JOB_NAMES,
+    catalogues() {
+      return (this.info?.catalogues || []).filter((c) => !c.custom);
+    },
+    resetLabels: () => ['Sort order', 'Hide graded stock', 'Hide out of stock', 'Tab order', 'Hidden profit panel'],
+  },
+  mounted() {
+    if (this.on) this.load();
+  },
+  methods: {
+    ...sharedMethods,
+    async load() {
+      this.loading = true;
+      this.error = null;
+      try {
+        this.info = await api('GET', '/api/dev/info');
+      } catch (err) {
+        this.error = err.message;
+      } finally {
+        this.loading = false;
+      }
+    },
+    async test(id) {
+      this.testing = { ...this.testing, [id]: true };
+      let result;
+      try {
+        result = await api('POST', `/api/dev/test/${id}`);
+      } catch (err) {
+        result = { ok: false, message: err.message };
+      }
+      try {
+        this.tests = { ...this.tests, [id]: result }; // after the wait, so two tests at once both show
+      } finally {
+        this.testing = { ...this.testing, [id]: false };
+      }
+    },
+    confirmed(text, word) {
+      return String(text || '').trim().toUpperCase() === word;
+    },
+    async run(job) {
+      if (!this.confirmed(this.confirms[job], 'RUN') || this.running) return;
+      this.running = job;
+      try {
+        this.lastRun = await api('POST', '/api/dev/jobs', { job, confirm: 'RUN' });
+        this.confirms[job] = '';
+        toast(`${JOB_NAMES[job]}: done`);
+        loadCatalogue(true);
+        await this.load();
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        this.running = null;
+      }
+    },
+    // One line for each catalogue the job looked at.
+    resultLine(r) {
+      const name = this.catalogues.find((c) => c.id === r.id)?.label || r.id;
+      if (r.error) return `${name}: ${r.error}`;
+      if (r.refreshed) return `${name}: updated${r.count != null ? ` (${Number(r.count).toLocaleString('en-GB')} products)` : ''}`;
+      if (r.ageHours != null) return `${name}: already up to date (${r.ageHours} h old)`;
+      return `${name}: no change`;
+    },
+    resetComputer() {
+      if (!this.confirmed(this.resetText, 'RESET')) return;
+      for (const key of RESET_KEYS) {
+        try {
+          localStorage.removeItem(key);
+        } catch {
+          /* private mode etc. */
+        }
+      }
+      toast('Cleared this computer’s saved choices. Reloading…');
+      setTimeout(() => location.reload(), 700);
+    },
+    turnOff() {
+      setDevOptions(false);
+      toast('Developer options are off on this computer.');
+      location.hash = '#/';
+    },
+  },
+  template: `
+  <div class="page dev-page">
+    <div class="page-head">
+      <MeshBand />
+      <div><p class="eyebrow">Developer options</p><h1>Dev</h1><p class="muted">How the app is running, and a few tools. Only on this computer.</p></div>
+      <button v-if="on" class="btn" @click="turnOff">Switch off on this computer</button>
+    </div>
+
+    <div class="card empty-state" v-if="!on">
+      <div class="es-mark"></div>
+      <h2>Developer options are off</h2>
+      <p class="muted">They aren’t switched on for this computer.</p>
+      <a class="btn" href="#/">Back to quotes</a>
+    </div>
+
+    <template v-else>
+      <div class="card" v-if="loading && !info"><div class="empty loading">Loading…</div></div>
+      <div class="card error-text" v-else-if="error && !info">{{ error }} <button class="link" @click="load">Try again</button></div>
+
+      <div class="dev-grid" v-if="info">
+        <section class="card">
+          <h2 class="card-title">This version</h2>
+          <dl class="dev-list">
+            <div><dt>Code</dt><dd><template v-if="info.commit">{{ info.commit.sha }}<template v-if="info.commit.branch"> on {{ info.commit.branch }}</template></template><template v-else>—</template></dd></div>
+            <div v-if="info.commit && info.commit.message"><dt>Last change</dt><dd>{{ info.commit.message }}</dd></div>
+            <div><dt>Running on</dt><dd>{{ info.server.onVercel ? 'Vercel' + (info.server.region ? ' (' + info.server.region + ')' : '') : 'This computer' }} · Node {{ info.server.node }}</dd></div>
+            <div><dt>Data saved in</dt><dd>{{ info.storage.name === 'upstash' ? 'Upstash database' : info.storage.name === 'files' ? 'Files on this computer' : (info.storage.name || 'Not connected') }}</dd></div>
+            <div><dt>Quotes</dt><dd>{{ info.counts.quotes }} · {{ info.counts.kits }} kit{{ info.counts.kits === 1 ? '' : 's' }} · {{ info.counts.productNames }} saved product name{{ info.counts.productNames === 1 ? '' : 's' }}</dd></div>
+            <div><dt>Server time</dt><dd>{{ formatDateTime(info.server.time) }}</dd></div>
+          </dl>
+          <button class="btn sm" @click="load" :disabled="loading">{{ loading ? 'Refreshing…' : 'Refresh this page' }}</button>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Connections</h2>
+          <p class="hint">Whether each private setting is set in Vercel (or .env). Their values are never shown.</p>
+          <dl class="dev-list">
+            <div v-for="(set, name) in info.settingsSet" :key="name"><dt><code>{{ name }}</code></dt><dd :class="set ? 'dev-ok' : 'dev-off'">{{ set ? 'Set' : 'Not set' }}</dd></div>
+          </dl>
+          <div class="dev-tests">
+            <div v-for="id in ['habitech', 'netxl']" :key="id" class="dev-test">
+              <button class="btn sm" @click="test(id)" :disabled="testing[id]">{{ testing[id] ? 'Testing…' : 'Test ' + (id === 'netxl' ? 'NetXL' : 'Habitech') }}</button>
+              <span v-if="tests[id]" :class="tests[id].ok ? 'dev-ok' : 'dev-bad'">{{ tests[id].message }}</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="card dev-wide">
+          <h2 class="card-title">Catalogues</h2>
+          <table class="dev-table">
+            <thead><tr><th>Catalogue</th><th class="num">Products</th><th>Last updated</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr v-for="c in catalogues" :key="c.id">
+                <td>{{ c.tabName || c.label }}</td>
+                <td class="num">
+                  <template v-if="c.kind === 'live'">{{ info.live[c.id] && info.live[c.id].copy ? info.live[c.id].copy.count.toLocaleString('en-GB') : '—' }}</template>
+                  <template v-else>{{ (c.count || 0).toLocaleString('en-GB') }}</template>
+                </td>
+                <td>
+                  <template v-if="c.kind === 'live'">{{ info.live[c.id] && info.live[c.id].copy ? timeAgo(info.live[c.id].copy.refreshedAt) : '—' }}</template>
+                  <template v-else>{{ c.fetchedAt ? timeAgo(c.fetchedAt) : '—' }}</template>
+                </td>
+                <td>
+                  <span v-if="c.configured === false" class="dev-off">Not connected</span>
+                  <span v-else-if="c.error" class="dev-bad">{{ c.error }}</span>
+                  <span v-else-if="c.kind === 'live' && info.live[c.id] && info.live[c.id].error" class="dev-bad">{{ info.live[c.id].error }}</span>
+                  <span v-else-if="c.kind === 'live' && info.live[c.id] && info.live[c.id].job" class="dev-off">Copying: {{ info.live[c.id].job.categoriesDone }} of {{ info.live[c.id].job.categoriesTotal }} categories</span>
+                  <span v-else-if="c.kind === 'import'" class="dev-off">{{ c.count ? 'Imported price list' : 'No price list yet' }}</span>
+                  <span v-else class="dev-ok">OK</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Nightly job</h2>
+          <p class="hint">Runs at 5am and refreshes any catalogue more than about 20 hours old.</p>
+          <template v-if="info.nightly">
+            <p class="sm">Last ran {{ formatDateTime(info.nightly.at) }} ({{ timeAgo(info.nightly.at) }}) · {{ info.nightly.trigger }}</p>
+            <ul class="dev-results"><li v-for="r in info.nightly.results" :key="r.id" :class="{ 'dev-bad': r.error }">{{ resultLine(r) }}</li></ul>
+          </template>
+          <p class="muted sm" v-else>No run recorded yet. (Runs are recorded from this version on.)</p>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Run jobs now</h2>
+          <p class="hint">These ask the suppliers for fresh prices, which uses up their request limits, so type <b>RUN</b> to confirm. They don’t delete anything.</p>
+          <div class="dev-confirm" v-for="(label, job) in JOB_NAMES" :key="job">
+            <label>{{ label }}<small>{{ job === 'nightly' ? 'Only catalogues more than ~20 hours old.' : 'Every catalogue, however recent. Online it stops after about 50 seconds; run it again to finish Habitech.' }}</small></label>
+            <div class="dev-confirm-row">
+              <input v-model="confirms[job]" placeholder="Type RUN" maxlength="10" :aria-label="'Type RUN to confirm: ' + label" @keydown.enter="run(job)">
+              <button class="btn sm" :class="{ primary: confirmed(confirms[job], 'RUN') }" :disabled="!confirmed(confirms[job], 'RUN') || Boolean(running)" @click="run(job)">{{ running === job ? 'Running…' : 'Run' }}</button>
+            </div>
+          </div>
+          <div v-if="lastRun" class="dev-last">
+            <b>{{ JOB_NAMES[lastRun.job] }}</b>
+            <ul class="dev-results"><li v-for="r in lastRun.results" :key="r.id" :class="{ 'dev-bad': r.error }">{{ resultLine(r) }}</li></ul>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Backup</h2>
+          <p class="hint">Downloads one file with every quote (and its saved versions and client replies), the settings, kits, our product names and our own products. Catalogues aren’t included: they’re copied again from the suppliers. Keep it somewhere safe: it has client details in it.</p>
+          <a class="btn" href="/api/dev/backup" download>Download backup</a>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Reset this computer</h2>
+          <p class="hint">Clears the choices this computer remembers: {{ resetLabels.join(', ').toLowerCase() }}. Quotes and settings aren’t touched, and nor are light/dark, who you are, or developer options. Type <b>RESET</b> to confirm.</p>
+          <div class="dev-confirm-row">
+            <input v-model="resetText" placeholder="Type RESET" maxlength="10" aria-label="Type RESET to confirm" @keydown.enter="resetComputer">
+            <button class="btn sm danger" :disabled="!confirmed(resetText, 'RESET')" @click="resetComputer">Reset</button>
+          </div>
+        </section>
+      </div>
+    </template>
+  </div>`,
+};
+
 const LightSwitch = {
   props: { modelValue: String },
   emits: ['update:modelValue'],
@@ -3538,9 +3810,10 @@ const tabInk = {
 // ---- App shell ---------------------------------------------------------------------
 
 const App = {
-  components: { QuotesList, QuoteEditor, ProductsPage, SettingsPage, LightSwitch },
+  components: { QuotesList, QuoteEditor, ProductsPage, SettingsPage, DevPage, LightSwitch },
   computed: {
     route: () => state.route,
+    devOn: () => devOptions.on,
     toasts: () => state.toasts,
     ready: () => !!state.settings,
     session: () => state.session,
@@ -3589,6 +3862,7 @@ const App = {
       <a href="#/" :class="{ active: route.name === 'quotes' || route.name === 'quote' }">Quotes</a>
       <a href="#/products" :class="{ active: route.name === 'products' }">Products</a>
       <a href="#/settings" :class="{ active: route.name === 'settings' }">Settings</a>
+      <a v-if="devOn" href="#/dev" class="dev-link" title="Developer options" :class="{ active: route.name === 'dev' }">Dev</a>
     </nav>
     <div class="header-right">
       <label class="me" v-if="team.length">
@@ -3612,6 +3886,7 @@ const App = {
     <QuoteEditor v-else-if="route.name === 'quote'" :id="route.id" :key="route.id" />
     <ProductsPage v-else-if="route.name === 'products'" />
     <SettingsPage v-else-if="route.name === 'settings'" />
+    <DevPage v-else-if="route.name === 'dev'" />
   </main>
   <TransitionGroup tag="div" class="toasts" name="toast" aria-live="polite">
     <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type" :style="{ '--life': t.life + 'ms' }">{{ t.msg }}</div>

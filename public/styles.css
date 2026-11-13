@@ -811,6 +811,47 @@ td .stock { margin-top: 3px; }
 .name-offer .link.muted { color: var(--muted); }
 .saved-name-tag { font-size: 11px; font-weight: 600; padding: 0 8px; border-radius: 99px; background: var(--blue-soft); color: var(--blue-text); cursor: default; }
 
+/* Developer options (the Dev page) */
+.app-header nav a.dev-link::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 7px; vertical-align: 0.15em; border-radius: 1px; background: var(--amber); }
+.dev-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.dev-grid > .card { margin-bottom: 0; }
+.dev-wide { grid-column: 1 / -1; }
+.dev-list { margin: 0 0 14px; }
+.dev-list > div { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; border-top: 1px solid var(--line-soft); font-size: 13.5px; }
+.dev-list > div:first-child { border-top: none; }
+.dev-list dt { color: var(--muted); flex: none; }
+.dev-list dd { margin: 0; min-width: 0; text-align: right; color: var(--ink); overflow-wrap: anywhere; }
+.dev-list code { font-size: 12px; }
+.dev-ok { color: var(--green); }
+.dev-off { color: var(--muted); }
+.dev-bad { color: var(--red); }
+.dev-tests { display: grid; gap: 8px; }
+.dev-test { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; }
+.dev-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.dev-table th { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.dev-table td { padding: 8px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.dev-table tr:last-child td { border-bottom: none; }
+.dev-table .num { text-align: right; white-space: nowrap; }
+.dev-results { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+.dev-results li { margin: 2px 0; }
+.dev-confirm { padding: 12px 0; border-top: 1px solid var(--line-soft); }
+.dev-confirm:first-of-type { padding-top: 0; border-top: none; }
+.dev-confirm label { display: block; margin-bottom: 6px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.dev-confirm label small { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--muted); }
+.dev-confirm-row { display: flex; align-items: center; gap: 8px; }
+.dev-confirm-row input { width: 150px; }
+.dev-last { margin-top: 12px; font-size: 13px; }
+@media (max-width: 760px) {
+  /* On phones the Dev link is just its amber square, so it fits beside the others. */
+  .app-header nav a.dev-link { font-size: 0; padding-left: 7px; padding-right: 7px; }
+  .app-header nav a.dev-link::before { width: 9px; height: 9px; margin: 0; vertical-align: middle; }
+  .dev-grid { grid-template-columns: 1fr; }
+  .dev-table th:nth-child(3), .dev-table td:nth-child(3) { display: none; }
+}
+@media (max-width: 400px) {
+  .app-header nav a { padding-left: 7px; padding-right: 7px; } /* room for the Dev square on small phones */
+}
+
 /* Add to Habitech basket */
 .habitech-card h3 { font-size: 16px; margin-bottom: 6px; }
 .habitech-card p { margin: 0 0 12px; font-size: 13px; }

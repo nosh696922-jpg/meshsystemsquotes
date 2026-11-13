@@ -243,6 +243,19 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
   before the front cover keep their old look. The picture,
   `public/img/proposal-cover.jpg`, was made from the designer's
   `mesh-NewFC-210x297.pdf` (300 dpi, without its four white boxes).
+- **Developer options** – search the team's secret word on the **Habitech** tab
+  (in **Add product** or on the Products page) and a **Dev** page appears on
+  that computer, with an amber **Dev** link at the top. It shows the version
+  that's running, where data is saved, which private settings are set (never
+  their values), each catalogue's last update and any problem, and the nightly
+  job's last results. It can test the Habitech and NetXL connections, run the
+  nightly job or refresh every catalogue (type **RUN** to confirm), download a
+  backup of all quotes, settings, kits and names (download only), and reset the
+  choices this computer remembers (type **RESET**). **Switch off on this
+  computer** hides it again. The word only hides the page: anyone signed in can
+  already do these things, and nothing on it deletes data. Only a fingerprint of
+  the word is in the code (`DEV_WORD_HASH` in `public/app.js`), as the code is
+  public.
 - **Two people** – if you both edit the same quote at once, the second person to
   save is warned and can load the other’s changes or keep their own.
 - **Look** – styled like the Mesh website, with a light and a dark mode (the
@@ -268,6 +281,7 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
 | `lib/client.js` | Client views and replies (accept, changes, decline) |
 | `lib/revisions.js`, `lib/kits.js` | Saved versions of quotes, and kits |
 | `lib/names.js` | Our own names for catalogue products |
+| `lib/dev.js` | The Dev page's server side: system info, connection tests, jobs and the backup |
 | `lib/habitech-basket.js` | Finds a quote's Habitech products on Habitech's website, for **Add to Habitech basket** |
 | `lib/pdf.js` | One-click PDF via Edge/Chrome (local only) |
 | `public/app.js`, `public/styles.css` | The quoting app |
@@ -317,6 +331,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v4.5` | **Add to Habitech basket** on quotes (tick a quote's Habitech products and open Habitech's website with them in your basket), and the new **front cover** (the house picture with Client, Project, Date and Revision) on new proposals, replacing the old "Separate cover page". Rolling back to `v4.4` removes both: proposals start with their title again, and quotes that had the old separate cover page get it back |
 | `v4.6` | The NetXL catalogue (needs `NETXL_API_KEY` in Vercel). Proposals: a line between each area, and the investment summary shows only the totals (no equipment and labour breakdown). The Quotes page loses its old “Ubiquiti UK catalogue” subheading. Rolling back to `v4.5` hides NetXL products (quote lines already added keep their prices) and brings the rest back; nothing is lost |
 | `v4.7` | Printed proposals: white page margins even when printed from the Windows program (they were dark navy), no browser date and title line at the top, and the company footer never on a page of its own. Catalogue tabs can be dragged into your own order, with a **More** menu for those that don't fit. Rolling back to `v4.6` brings back the old print and fixed tabs; the saved tab order is just ignored |
+| `v4.8` | Developer options: a **Dev** page opened by searching a secret word on the Habitech tab (system info, connection tests, run jobs, backup download, reset this computer). Rolling back to `v4.7` removes it; nothing else changes |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s
