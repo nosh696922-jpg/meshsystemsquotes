@@ -221,6 +221,11 @@ folder (copy `.env.example`). It is never uploaded to GitHub.
   prices. Type a cost on any item to override.
 - **Kits** – save an area’s items and labour as a kit (e.g. “Standard WiFi
   room”) and add it to any quote in one click from **Add product → Kits**.
+- **Team notes** – a box on the right of every quote (below the profit panel;
+  at the bottom on a phone) for things only your team needs, like a gate code,
+  parking or the best time to call. They're never on the proposal, PDF or
+  client link, editing them doesn't change the revision number, and going back
+  to an earlier version keeps today's notes. Duplicating a quote copies them.
 - **Versions** – a version is saved when you send the link and when the client
   replies; save your own any time. See what changed since any version, or go
   back to it.
@@ -332,6 +337,7 @@ Each release is tagged on GitHub (the repo’s **Tags** list):
 | `v4.6` | The NetXL catalogue (needs `NETXL_API_KEY` in Vercel). Proposals: a line between each area, and the investment summary shows only the totals (no equipment and labour breakdown). The Quotes page loses its old “Ubiquiti UK catalogue” subheading. Rolling back to `v4.5` hides NetXL products (quote lines already added keep their prices) and brings the rest back; nothing is lost |
 | `v4.7` | Printed proposals: white page margins even when printed from the Windows program (they were dark navy), no browser date and title line at the top, and the company footer never on a page of its own. Catalogue tabs can be dragged into your own order, with a **More** menu for those that don't fit. Rolling back to `v4.6` brings back the old print and fixed tabs; the saved tab order is just ignored |
 | `v4.8` | Developer options: a **Dev** page opened by searching a secret word on the Habitech tab (system info, connection tests, run jobs, backup download, reset this computer). Rolling back to `v4.7` removes it; nothing else changes |
+| `v4.9` | **Team notes** on the right of every quote (moved from the bottom of Pricing & terms; never on the proposal, and editing them no longer changes the revision number), the right-hand column scrolls on its own when it's taller than the window, and the proposal preview has no "Back to editor" button. Rolling back to `v4.8` puts the notes box back under Pricing & terms (the notes are kept) and brings the button back |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
   of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s

@@ -590,7 +590,8 @@ table.list .strong { font-family: var(--font-head); font-weight: 500; letter-spa
 .editor-tabs { margin-top: 14px; }
 
 .editor-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
-.editor-side { position: sticky; top: 80px; }
+/* Stays in view while you scroll; scrolls on its own when it's taller than the window. */
+.editor-side { position: sticky; top: 80px; max-height: calc(100vh - 92px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding: 0 2px 2px; margin: 0 -2px; }
 
 /* Areas */
 .area-card { padding: 0; }
@@ -853,6 +854,9 @@ td .stock { margin-top: 3px; }
 }
 
 /* Add to Habitech basket */
+.team-notes h3 { font-size: 16px; margin-bottom: 10px; }
+.team-notes h3 small { font-family: var(--font-body); font-size: 11.5px; font-weight: 400; letter-spacing: 0; color: var(--muted); margin-left: 4px; }
+.team-notes textarea { font-size: 14px; max-height: 260px; overflow-y: auto; }
 .habitech-card h3 { font-size: 16px; margin-bottom: 6px; }
 .habitech-card p { margin: 0 0 12px; font-size: 13px; }
 .habitech-card .btn { width: 100%; justify-content: center; }
@@ -1084,7 +1088,7 @@ table.list tr.click:hover td:first-child { box-shadow: inset 3px 0 0 var(--blue)
 
 @media (max-width: 1060px) {
   .editor-body { grid-template-columns: 1fr; }
-  .editor-side { position: static; }
+  .editor-side { position: static; max-height: none; overflow: visible; padding: 0; margin: 0; }
   .editor-side .side-meta { display: none; }
 }
 

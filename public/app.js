@@ -2623,11 +2623,6 @@ const QuoteEditor = {
             <h2 class="card-title">Terms</h2>
             <AutoTextarea v-model="quote.terms" :rows="6" placeholder="One term per line" />
           </section>
-
-          <section class="card">
-            <h2 class="card-title">Internal notes <small class="muted">— never shown to the client</small></h2>
-            <AutoTextarea v-model="quote.notes" :rows="3" placeholder="Notes for the team" />
-          </section>
         </template>
 
         <!-- History -->
@@ -2722,6 +2717,10 @@ const QuoteEditor = {
           <p class="profit-note" v-if="totals.missingCost">{{ totals.missingCost }} item{{ totals.missingCost === 1 ? ' has' : 's have' }} no cost price, so {{ totals.missingCost === 1 ? 'it counts' : 'they count' }} at the selling price.</p>
         </div>
         <button v-else class="link sm show-profit" @click="toggleProfit">Show profit</button>
+        <div class="card team-notes">
+          <h3>Team notes <small>never on the proposal</small></h3>
+          <AutoTextarea v-model="quote.notes" :rows="2" placeholder="e.g. gate code, parking, best time to call" aria-label="Team notes" />
+        </div>
         <div class="card habitech-card" v-if="habitechLines.length">
           <h3>Habitech</h3>
           <p class="muted sm">{{ habitechLines.length }} product{{ habitechLines.length === 1 ? '' : 's' }} on this quote {{ habitechLines.length === 1 ? 'comes' : 'come' }} from Habitech.</p>

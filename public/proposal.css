@@ -94,8 +94,6 @@ body.web-mode { background: var(--paper); }
   transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s var(--ease), box-shadow 0.2s ease;
 }
 .toolbar a:hover, .toolbar button:hover { background: rgba(255, 255, 255, 0.09); }
-.toolbar .tb-back { border-color: transparent; background: transparent; padding-left: 0; padding-right: 0; color: #a5afbf; font-weight: 400; }
-.toolbar .tb-back:hover { background: transparent; color: #fff; }
 .toolbar .tb-actions { display: flex; gap: 8px; }
 .toolbar .tb-primary { background: var(--blue-btn); border-color: var(--blue-btn); color: #fff; box-shadow: 0 6px 18px rgba(44, 111, 174, 0.35); }
 .toolbar .tb-primary:hover { background: var(--blue-btn-hover); border-color: var(--blue-btn-hover); transform: translateY(-1px); }
