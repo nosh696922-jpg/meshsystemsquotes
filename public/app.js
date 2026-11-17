@@ -340,6 +340,49 @@ function storePriceIndex() {
   return index;
 }
 
+// Catalogue products by maker part number (C.partKey), to spot the same
+// product at another supplier, and by id. Rebuilt when the list is reloaded.
+let partsFor = null;
+let partsIndex = { parts: new Map(), byId: new Map() };
+function storePartIndex() {
+  if (partsFor === state.catalogue.products) return partsIndex;
+  partsFor = state.catalogue.products;
+  const parts = new Map();
+  const byId = new Map();
+  for (const p of state.catalogue.products) {
+    byId.set(p.id, p);
+    if (p.source === 'custom' || isGraded(p)) continue;
+    for (const v of p.variants) {
+      // A product's own model number only stands for it when it has one option
+      // (otherwise it's the first colour or pack size's).
+      const codes = [v.sku, v.displaySku, p.variants.length === 1 ? p.model : ''];
+      for (const key of new Set(codes.map(C.partKey).filter(Boolean))) {
+        if (!parts.has(key)) parts.set(key, []);
+        parts.get(key).push({ product: p, variant: v });
+      }
+    }
+  }
+  partsIndex = { parts, byId };
+  return partsIndex;
+}
+
+// Whether two suppliers' maker names are the same maker ("Sonos" and
+// "Sonos Pro", "UniFi" and "Ubiquiti"). A blank or "Other" maker matches any.
+const MAKER_ALIASES = { unifi: 'ubiquiti', ubiquitinetworks: 'ubiquiti', ubnt: 'ubiquiti' };
+const makerKey = (name) => {
+  const k = norm(name);
+  return MAKER_ALIASES[k] || k;
+};
+function sameMaker(a, b) {
+  const x = makerKey(a);
+  const y = makerKey(b);
+  return !x || !y || x === 'other' || y === 'other' || x.startsWith(y) || y.startsWith(x);
+}
+
+// What to call a supplier next to its price, e.g. "NetXL", "Ubiquiti store".
+const SUPPLIER_NAMES = { ubiquiti: 'Ubiquiti store', sonos: 'Sonos shop' };
+const supplierName = (source) => SUPPLIER_NAMES[source] || (catalogueSources().find((s) => s.id === source) || {}).label || source;
+
 // A copy of a saved line with today's catalogue price (used for kits).
 function withCurrentPrice(item, prices) {
   const now = prices[priceKey(item)];
@@ -1715,7 +1758,10 @@ const QuoteEditor = {
       kitDraft: null,
       hideProfit: storageGet('mesh.hideProfit') === '1',
       livePrices: {}, // today's Habitech price, cost and stock, keyed like priceKey()
+      habitechMatches: {}, // part number (C.partKey) → Habitech products with it
       basket: null, // the "Add to Habitech basket" window
+      sendCheck: false, // the "check the margins first?" window
+      marginsChecked: false, // said "Copy link anyway" since opening the quote
     };
   },
   computed: {
@@ -1735,7 +1781,38 @@ const QuoteEditor = {
     },
     marginClass() {
       const m = this.totals?.margin || 0;
-      return m < 0 ? 'loss' : m < 10 ? 'thin' : 'ok';
+      return m < 0 ? 'loss' : m < (this.minMargin ?? 10) ? 'thin' : 'ok';
+    },
+    // The lowest margin we're happy with (Settings), or null when it's off.
+    minMargin() {
+      const m = this.settings?.minMargin;
+      return m === '' || m == null || !Number.isFinite(Number(m)) ? null : Number(m);
+    },
+    // Lines sold below cost or under that margin, by line id.
+    marginFlags() {
+      const flags = {};
+      if (!this.quote) return flags;
+      for (const s of this.quote.sections) {
+        for (const item of s.items) {
+          const flag = this.marginFlag(item);
+          if (flag) flags[item.id] = flag;
+        }
+      }
+      return flags;
+    },
+    lowMarginLines() {
+      if (!this.quote) return [];
+      return this.quote.sections.flatMap((s) => s.items.filter((i) => this.marginFlags[i.id]).map((item) => ({ item, ...this.marginFlags[item.id] })));
+    },
+    lowMarginText() {
+      const loss = this.lowMarginLines.filter((l) => l.level === 'loss').length;
+      const thin = this.lowMarginLines.length - loss;
+      const lines = (n) => `${n} line${n === 1 ? '' : 's'}`;
+      const isAre = (n) => (n === 1 ? 'is' : 'are');
+      const under = `under the ${this.minMargin}% margin set in Settings`;
+      if (loss && thin) return `${lines(loss)} ${isAre(loss)} priced below cost, and ${thin} more ${isAre(thin)} ${under}.`;
+      if (loss) return `${lines(loss)} ${isAre(loss)} priced below cost.`;
+      return thin ? `${lines(thin)} ${isAre(thin)} ${under}.` : '';
     },
     versions() {
       return this.revisions ? [...this.revisions].reverse() : [];
@@ -1777,6 +1854,31 @@ const QuoteEditor = {
       const keys = new Set();
       for (const s of this.quote.sections) for (const i of s.items) if (i.kind !== 'labour' && i.sku && isLiveSource(i.source)) keys.add(priceKey(i));
       return [...keys].sort().join('\n');
+    },
+    // Every part number on the quote, to ask whether Habitech has them too.
+    partKeys() {
+      if (!this.quote) return '';
+      const keys = new Set();
+      for (const s of this.quote.sections) for (const i of s.items) if (i.kind !== 'labour') for (const k of this.lineParts(i)) keys.add(k);
+      return [...keys].sort().join('\n');
+    },
+    // For each line (by id), the same product at other suppliers, cheapest to
+    // us first, and `best`: the cheapest when it saves us something (or when
+    // we don't know what the line costs us now).
+    supplierOffers() {
+      const out = {};
+      if (!this.quote || !state.catalogue.loaded) return out;
+      for (const s of this.quote.sections) {
+        for (const item of s.items) {
+          const offers = this.offersFor(item);
+          if (!offers.length) continue;
+          const known = C.costKnown(item, this.quote);
+          const saving = known ? C.unitCost(item, this.quote) - offers[0].cost : null;
+          const worthIt = !known || (saving >= 50 && saving >= C.unitCost(item, this.quote) * 0.01); // 50p and 1%, so pennies don't nag
+          out[item.id] = { offers, known, saving, best: worthIt ? offers[0] : null };
+        }
+      }
+      return out;
     },
     // The quote's Habitech products, each part code once with its total
     // quantity and the areas it's in.
@@ -1872,6 +1974,10 @@ const QuoteEditor = {
       clearTimeout(this.liveTimer);
       this.liveTimer = setTimeout(() => this.loadLivePrices(), 400);
     },
+    partKeys() {
+      clearTimeout(this.matchTimer);
+      this.matchTimer = setTimeout(() => this.loadHabitechMatches(), 600);
+    },
   },
   async mounted() {
     loadCatalogue();
@@ -1898,6 +2004,7 @@ const QuoteEditor = {
     window.removeEventListener('beforeunload', this.onUnload);
     document.removeEventListener('visibilitychange', this.onVisible);
     clearTimeout(this.liveTimer);
+    clearTimeout(this.matchTimer);
     if (this.saveState === 'unsaved') this.saveNow();
   },
   methods: {
@@ -2024,6 +2131,12 @@ const QuoteEditor = {
       storageSet('mesh.hideProfit', this.hideProfit ? '1' : '0');
     },
     async copyClientLink() {
+      // Lines below cost or under our margin: ask once before it goes out
+      // (not while the profit is hidden, in case a client can see the screen).
+      if (this.lowMarginLines.length && !this.marginsChecked && !this.hideProfit) {
+        this.sendCheck = true;
+        return;
+      }
       // Sharing the link is sending it, so mark the quote as Sent.
       const marked = ['draft', 'changes'].includes(this.quote.status);
       if (marked) {
@@ -2141,6 +2254,21 @@ const QuoteEditor = {
       if (!t.equipment) return null;
       return ((t.equipment - C.unitCost(item, this.quote) * Number(item.qty || 0)) / t.equipment) * 100;
     },
+    // A line we'd sell for less than it costs us, or for under the margin in
+    // Settings. Lines with no known cost aren't flagged.
+    marginFlag(item) {
+      if (item.kind === 'labour' || !(Number(item.qty) > 0) || !C.costKnown(item, this.quote)) return null;
+      const cost = C.unitCost(item, this.quote) * Number(item.qty);
+      if (cost <= 0) return null;
+      const sale = this.itemTotals(item).equipment;
+      if (sale < cost) return { level: 'loss', text: `Below cost by ${money(cost - sale)}`, title: 'We’d sell this for less than it costs us. Click to see our cost.' };
+      const margin = ((sale - cost) / sale) * 100;
+      if (this.minMargin === null || margin >= this.minMargin) return null;
+      // Rounded like the cost panel's margin, but 24.96 shows as 24.9 (not 25) under 25.
+      let shown = Math.round(margin * 10) / 10;
+      if (shown >= this.minMargin) shown = Math.floor(margin * 10) / 10;
+      return { level: 'thin', text: `Only ${shown}% margin`, title: `Under the ${this.minMargin}% margin set in Settings. Click to see our cost.` };
+    },
     labourCost(item, entry) {
       return Math.round(Number(entry.hours || 0) * Number(item.qty || 0) * C.labourRate(this.quote, entry.type));
     },
@@ -2194,6 +2322,88 @@ const QuoteEditor = {
     // Stock on a quote line: today's for Habitech, the daily copy's for NetXL.
     liveStock(item) {
       return stockText(this.priceIndex[priceKey(item)]);
+    },
+
+    // ---- The same product at another supplier ----
+    // A line's maker part numbers (C.partKey): its option's code, and the
+    // model number where that's the maker's (Habitech's mpn, one-option
+    // products, our own products).
+    lineParts(item) {
+      const codes = [item.sku, this.priceIndex[priceKey(item)]?.displaySku];
+      const product = storePartIndex().byId.get(item.productId);
+      if (!C.isCatalogueItem(item) || isLiveSource(item.source) || product?.variants.length === 1) codes.push(item.model);
+      return [...new Set(codes.map(C.partKey).filter(Boolean))];
+    },
+    // Other suppliers' products with the line's part number and a known cost,
+    // cheapest to us first. Not refurbished/graded stock, and not other
+    // options (colours, regions) of the line's own product.
+    offersFor(item) {
+      if (item.kind === 'labour') return [];
+      const keys = this.lineParts(item);
+      if (!keys.length) return [];
+      const seen = new Set([priceKey(item)]);
+      const offers = [];
+      const add = (product, variant) => {
+        const key = `${product.source}|${variant.sku}`;
+        if (seen.has(key) || product.id === item.productId || isGraded(product) || !sameMaker(item.manufacturer, product.manufacturer)) return;
+        seen.add(key);
+        if (['NoPrice', 'RegionNotAvailable', 'Discontinued'].includes(variant.status)) return;
+        const line = itemFromProduct(product, variant, 1);
+        const cost = C.unitCost(line, this.quote);
+        if (!C.costKnown(line, this.quote) || !(cost > 0)) return;
+        const badge = variant.status && variant.status !== 'Available' ? STATUS_BADGE[variant.status] || '' : ''; // "Sold out", "Coming soon"
+        offers.push({
+          key,
+          product,
+          variant,
+          name: supplierName(product.source),
+          cost,
+          stock: badge || stockText(variant),
+          stockLevel: badge ? 'out_of_stock' : variant.stock || '',
+        });
+      };
+      const { parts } = storePartIndex();
+      for (const k of keys) for (const e of parts.get(k) || []) add(e.product, e.variant);
+      for (const k of keys) for (const p of this.habitechMatches[k] || []) add(p, p.variants[0]);
+      return offers.sort((a, b) => a.cost - b.cost);
+    },
+    // Buy this line from another supplier instead. The client's price stays
+    // the same; the line's "Reset to" button goes to the new supplier's price.
+    switchSupplier(item, offer) {
+      const before = C.unitPrice(item, this.quote);
+      const next = itemFromProduct(offer.product, offer.variant, item.qty);
+      Object.assign(item, {
+        source: next.source,
+        productId: next.productId,
+        manufacturer: next.manufacturer,
+        model: next.model || item.model,
+        sku: next.sku,
+        url: next.url,
+        image: item.image || next.image,
+        basePrice: next.basePrice,
+        surcharge: next.surcharge,
+        costPrice: next.costPrice,
+      });
+      if (item.priceOverride == null && C.unitPrice(item, this.quote) !== before) item.priceOverride = before;
+      toast(`Now from ${offer.name}, costing us ${money(offer.cost)} each. The client’s price stays ${money(before)}.`);
+    },
+    // Ask which of the quote's part numbers Habitech's list has too (each
+    // once per visit). A failure just means no Habitech suggestions.
+    async loadHabitechMatches() {
+      if (!isLiveSource('habitech')) return;
+      this.matchAsked ||= new Set();
+      const parts = this.partKeys.split('\n').filter((k) => k && !this.matchAsked.has(k));
+      if (!parts.length) return;
+      for (const k of parts) this.matchAsked.add(k);
+      try {
+        const { rows, imageBase } = await api('POST', '/api/catalogue/habitech/match', { parts });
+        const next = { ...this.habitechMatches };
+        for (const k of parts) next[k] = Object.freeze((rows[k] || []).map((r) => liveProductFromRow('habitech', r, imageBase || '')));
+        this.habitechMatches = next;
+      } catch (err) {
+        for (const k of parts) this.matchAsked.delete(k); // try again next time
+        console.warn(`Could not compare with Habitech: ${err.message}`);
+      }
     },
 
     // Our own names for catalogue products (Our products are renamed on the
@@ -2341,6 +2551,7 @@ const QuoteEditor = {
             {{ changedPrices.length }} product price{{ changedPrices.length === 1 ? ' has' : 's have' }} changed in the catalogue since {{ changedPrices.length === 1 ? 'it was' : 'they were' }} added.
             <button class="link" @click="applyAllStorePrices">Update to current prices</button>
           </div>
+          <div class="notice warn" v-if="!hideProfit && lowMarginLines.length">{{ lowMarginText }} {{ lowMarginLines.length === 1 ? 'It’s' : 'They’re' }} marked below.</div>
 
           <TransitionGroup name="area">
           <section class="card area-card" v-for="(section, si) in quote.sections" :key="section.id">
@@ -2396,6 +2607,7 @@ const QuoteEditor = {
                       <span>{{ item.sku || item.model }}</span>
                       <span class="saved-name-tag" v-if="hasSavedName(item)" title="Every quote gets this name for this product. Change it on the Products page (Rename).">Saved name</span>
                       <span class="stock" v-if="liveStock(item)" :class="liveStockLevel(item)">{{ liveStock(item) }}</span>
+                      <button type="button" class="margin-flag" :class="marginFlags[item.id].level" v-if="!hideProfit && marginFlags[item.id]" :title="marginFlags[item.id].title" @click="costOpen[item.id] = true">{{ marginFlags[item.id].text }}</button>
                       <a v-if="item.url" :href="item.url" target="_blank" rel="noopener">store page ↗</a>
                       <button class="link sm" @click="descOpen[item.id] = !descOpen[item.id]">{{ descOpen[item.id] ? 'Hide description' : 'Description' }}</button>
                       <button class="link sm" v-if="!item.discount" @click="discOpen[item.id] = !discOpen[item.id]">Discount</button>
@@ -2413,12 +2625,27 @@ const QuoteEditor = {
                       <span class="muted sm" v-if="item.costPrice == null && item.source === 'ubiquiti'">(store price{{ quote.costDiscount ? ' less ' + quote.costDiscount + '%' : '' }})</span>
                       <span class="muted sm" v-else-if="item.source === 'crestron' && item.costPrice != null">(Crestron dealer price)</span>
                       <span class="muted sm" v-else-if="item.source === 'habitech' && item.costPrice != null">(Habitech trade price)</span>
+                      <span class="muted sm" v-else-if="item.source === 'netxl' && item.costPrice != null">(NetXL trade price)</span>
                       <span class="muted sm" v-else-if="item.costPrice == null && item.source === 'sonos' && quote.sonosCostDiscount != null && quote.sonosCostDiscount !== ''">(Sonos price less {{ quote.sonosCostDiscount }}%)</span>
                       <span class="muted sm" v-else-if="item.costPrice == null && item.source === 'sonos'">(type what we pay, or set the Sonos discount under Pricing &amp; terms)</span>
+                      <div class="other-suppliers" v-if="supplierOffers[item.id]">
+                        <span class="muted">Also at</span>
+                        <span class="offer" v-for="o in supplierOffers[item.id].offers" :key="o.key">
+                          <b>{{ o.name }}</b> {{ money(o.cost) }}
+                          <span class="stock" :class="o.stockLevel" v-if="o.stock">{{ o.stock }}</span>
+                          <button class="link sm" @click="switchSupplier(item, o)" :title="'Buy it from ' + o.name + '. The client’s price stays the same.'">Switch</button>
+                        </span>
+                      </div>
                     </div>
                     <div class="price-change" v-if="storePriceChange(item)">
                       {{ item.source === 'habitech' ? 'Habitech SRP' : 'Store price' }} now {{ money(storePriceChange(item).price) }}<template v-if="storePriceChange(item).surcharge"> + {{ money(storePriceChange(item).surcharge) }} surcharge</template><template v-if="storePriceChange(item).cost != null && storePriceChange(item).cost !== item.costPrice && item.source === 'habitech'"> (our cost {{ money(storePriceChange(item).cost) }})</template>
                       <button class="link sm" @click="applyStorePrice(item)">Update</button>
+                    </div>
+                    <div class="supplier-hint" v-if="!hideProfit && supplierOffers[item.id] && supplierOffers[item.id].best">
+                      <span v-if="supplierOffers[item.id].known">Cheaper at {{ supplierOffers[item.id].best.name }}: {{ money(supplierOffers[item.id].best.cost) }} each, saves us {{ money(supplierOffers[item.id].saving) }} each</span>
+                      <span v-else>{{ supplierOffers[item.id].best.name }} has it for {{ money(supplierOffers[item.id].best.cost) }} each (our cost)</span>
+                      <span class="stock" :class="supplierOffers[item.id].best.stockLevel" v-if="supplierOffers[item.id].best.stock">{{ supplierOffers[item.id].best.stock }}</span>
+                      <button class="link sm" @click="switchSupplier(item, supplierOffers[item.id].best)" title="The client’s price stays the same">Switch</button>
                     </div>
                   </div>
                   <label class="l-qty"><input type="number" min="0" step="1" v-model.number="item.qty" aria-label="Quantity"></label>
@@ -2715,6 +2942,7 @@ const QuoteEditor = {
           <div class="sum-sub"><span>Our costs</span><span>{{ money(totals.cost) }}</span></div>
           <p class="profit-note" v-if="totals.missingLabourHours">{{ hours(totals.missingLabourHours) }} of labour has no cost per hour, so it counts as all profit. <a href="#" @click.prevent="tab = 'pricing'">Add labour costs</a></p>
           <p class="profit-note" v-if="totals.missingCost">{{ totals.missingCost }} item{{ totals.missingCost === 1 ? ' has' : 's have' }} no cost price, so {{ totals.missingCost === 1 ? 'it counts' : 'they count' }} at the selling price.</p>
+          <p class="profit-note warn" v-if="lowMarginLines.length">{{ lowMarginText }} <a href="#" v-if="tab !== 'items'" @click.prevent="tab = 'items'">Show them</a></p>
         </div>
         <button v-else class="link sm show-profit" @click="toggleProfit">Show profit</button>
         <div class="card team-notes">
@@ -2737,6 +2965,17 @@ const QuoteEditor = {
     </div>
 
     <Transition name="modal"><ProductPicker v-if="pickerSection" :section-name="pickerSectionName" :quote="quote" @add="addItem" @close="pickerSection = null" /></Transition>
+
+    <Transition name="modal"><Modal v-if="sendCheck" title="Check the margins first?" @close="sendCheck = false">
+      <p class="muted sm" style="margin-top: 0">{{ lowMarginText }} Only we see this, not the client.</p>
+      <ul class="send-check">
+        <li v-for="l in lowMarginLines" :key="l.item.id"><span>{{ l.item.name }}</span><b :class="l.level">{{ l.text }}</b></li>
+      </ul>
+      <template #footer>
+        <button class="btn" @click="sendCheck = false; tab = 'items'">Check them</button>
+        <button class="btn primary" @click="sendCheck = false; marginsChecked = true; copyClientLink()">Copy link anyway</button>
+      </template>
+    </Modal></Transition>
 
     <Transition name="modal"><Modal v-if="kitDraft" title="Save as kit" @close="kitDraft = null">
       <p class="muted sm" style="margin-top: 0">Saves the {{ kitDraft.items.length }} line{{ kitDraft.items.length === 1 ? '' : 's' }} in this area, with their labour, so you can add them to any quote from <b>Add product → Kits</b>. Ubiquiti prices update to the store's when you add it.</p>
@@ -3398,6 +3637,7 @@ const SettingsPage = {
         <label>Markup on Ubiquiti store prices (%)<input type="number" step="0.5" v-model.number="s.markup"></label>
         <label>Our trade discount off Ubiquiti store prices (%)<input type="number" step="0.5" min="0" max="100" v-model.number="s.costDiscount"><small class="muted">Internal, for the profit figure</small></label>
         <label>Our trade discount off Sonos prices (%)<input type="number" step="0.5" min="0" max="100" v-model.number="s.sonosCostDiscount" placeholder="Not set"><small class="muted">Internal, for the profit figure. Off the Sonos UK price ex VAT</small></label>
+        <label>Warn when a line's margin is under (%)<input type="number" step="1" min="0" max="100" v-model.number="s.minMargin" placeholder="Off"><small class="muted">Internal. Lines sold below cost are always flagged</small></label>
         <label class="check span-2"><input type="checkbox" v-model="s.includeSurcharges"> Include Ubiquiti surcharges in prices</label>
       </div>
       <h3 class="sub-title">What proposals show</h3>

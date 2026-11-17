@@ -1,109 +1,114 @@
-# Mesh quoting tool (proof of concept)
+# Mesh Quotes
 
-Build quotes from the Ubiquiti UK store catalogue plus your own products, add
-labour by the hour, write your own scope, and send clients a Mesh-branded
-proposal as a web link or PDF.
+This is the quoting tool I built for Mesh Smart Home Technology. You pick
+products from our suppliers' catalogues (Ubiquiti, Sonos, Crestron, Habitech,
+NetXL) or add your own, put labour on by the hour, write the scope, and send the
+client a proper Mesh-branded proposal as a link or a PDF.
 
-## Put it online with Vercel
+It's still a proof of concept, so there are a few rough edges (see
+[Stuff it can't do yet](#stuff-it-cant-do-yet) at the bottom).
 
-You need a free [Vercel](https://vercel.com) account. It takes about 10 minutes.
+## Getting it online (Vercel)
 
-1. **Import the project.** In Vercel, click **Add New → Project**, connect your
-   GitHub account if asked, and import **meshsystemsquotes**. Leave the settings
-   as they are (Framework Preset: *Other*) and click **Deploy**. The first
-   deploy will show a “one more setup step” message; that’s expected.
-2. **Add a database** (this is where quotes are saved). In the project, open
-   **Storage → Create Database** (or *Browse Marketplace*), choose
-   **Upstash → Upstash for Redis**, pick the free plan and a London/Europe region,
-   and connect it to this project. Vercel adds the connection settings for you.
-3. **Set the team password.** Open **Settings → Environment Variables** and add
-   `TEAM_PASSWORD` with a long password that you two will share.
-4. **Redeploy.** Go to **Deployments**, open the menu (⋯) on the latest one and
-   click **Redeploy**, so the new settings take effect.
-5. **Open your site** (e.g. `https://meshsystemsquotes.vercel.app`), sign in,
-   then go to **Settings** and add your names and company details. The Ubiquiti
+You'll need a free [Vercel](https://vercel.com) account. It takes about 10 minutes.
+
+1. **Import the project.** In Vercel, click **Add New → Project**, connect GitHub
+   if it asks, and import **meshsystemsquotes**. Leave the settings alone
+   (Framework Preset: *Other*) and hit **Deploy**. The first deploy shows a “one
+   more setup step” message. That's fine, it's meant to.
+2. **Add a database** (it's where the quotes live). In the project, go to
+   **Storage → Create Database** (or *Browse Marketplace*), pick
+   **Upstash → Upstash for Redis**, the free plan and a London/Europe region, and
+   connect it to the project. Vercel adds the connection settings for you.
+3. **Set the team password.** Go to **Settings → Environment Variables** and add
+   `TEAM_PASSWORD` with a long password the team will share.
+4. **Redeploy.** Go to **Deployments**, open the ⋯ menu on the latest one and
+   click **Redeploy**, so the new settings kick in.
+5. **Open the site** (e.g. `https://meshsystemsquotes.vercel.app`), sign in, then
+   go to **Settings** and put in your names and the company details. The Ubiquiti
    catalogue loads the first time you open the product picker (about 10 seconds).
 
 ### Connecting Habitech
 
-Habitech gives us an API key for our trade account (it starts `hab_live_`).
-In Vercel, open **Settings → Environment Variables**, add `HABITECH_API_KEY`
-with the key as its value, tick **Sensitive**, and redeploy. The key stays on
-the server; nobody using the app can see it. Never put it in the code or send
-it in chat or email. If it leaks, ask Habitech for a new one.
+Habitech gave us an API key for our trade account (it starts with `hab_live_`).
+In Vercel, go to **Settings → Environment Variables**, add `HABITECH_API_KEY`
+with the key as the value, tick **Sensitive**, and redeploy. The key stays on
+the server, so nobody using the app can see it. Don't ever put it in the code or
+send it in a chat or email. If it leaks, just ask Habitech for a new one.
 
 ### Connecting NetXL
 
-Make an API key in NetXL: **netxl.com → My Account → Trade & API** (it's 64
-characters and shown only once). In Vercel, open **Settings → Environment
-Variables**, add `NETXL_API_KEY` with the key as its value, tick **Sensitive**,
-and redeploy. On your own computer, put it in the `.env` file. Never put it in
-the code or send it in chat or email. If it leaks, delete it in NetXL and make a
-new one.
+Make a key in NetXL: **netxl.com → My Account → Trade & API**. It's 64
+characters and you only see it once, so copy it straight away. Then in Vercel go
+to **Settings → Environment Variables**, add `NETXL_API_KEY` with the key as the
+value, tick **Sensitive**, and redeploy. On your own computer it goes in the
+`.env` file. Same rules as Habitech: never in the code, a chat or an email. If
+it leaks, delete it in NetXL and make a new one.
 
-### Sharing a proposal with a client
+### Sending a proposal to a client
 
-Open a quote and click **Copy client link**. Anyone with that link can *view*
-the proposal (not edit it, and not see any other quotes), and can save it as a
-PDF from their browser. The links are long and random, so they can’t be guessed,
-but treat them like a private document: only send them to the client.
+Open a quote and click **Copy client link**. Anyone with the link can *view*
+the proposal (they can't edit it or see any other quotes) and save it as a PDF
+from their browser. The links are long and random so nobody's guessing them,
+but treat them like a private document and only send them to the client.
 
-Online, **Save as PDF** opens the browser’s print window; choose *Save as PDF*
-as the printer.
+Online, **Save as PDF** opens the print window; just pick *Save as PDF* as the
+printer.
 
-Copying the link marks the quote as **Sent**. On the link, the client can
+Copying the link marks the quote as **Sent**. From the link, the client can
 **accept** (name, optional PO number, tick to agree), **request changes** or
-**decline**. Their reply sets the quote’s status and shows at the top of the
-quote and in the quotes list. The **History** tab shows when they opened it
-(your team’s own views, and link previews in WhatsApp, email and so on, don’t
-count).
+**decline**. Whatever they pick sets the quote's status and shows at the top of
+the quote and in the quotes list. The **History** tab shows when they opened it
+(our own views don't count, and neither do link previews in WhatsApp, email and
+so on).
 
 ### What runs on Vercel
 
-- Quotes, settings and your products are stored in Upstash Redis.
-- Ubiquiti prices refresh daily at 5am (a Vercel Cron job), or any time from the
-  Products page.
-- Your password is only ever stored in Vercel’s environment settings, never in
-  this repository.
+- Quotes, settings and our own products are saved in Upstash Redis.
+- The catalogues refresh every night at 5am (a Vercel Cron job), or whenever you
+  like from the Products page.
+- The password only ever lives in Vercel's environment settings, never in this
+  repo.
 
-### Using it like a program (desktop app)
+### Using it like a program
 
-The website can be installed as an app, with its own window and icon in the
-Start menu and taskbar (the home screen on a phone). It's the same website
-underneath, so the quotes are the same everywhere and it updates itself when a
-new version goes live. Nothing needs downloading.
+You can install the website as an app, so it gets its own window and icon in
+the Start menu and taskbar (or on your phone's home screen). It's the same
+website underneath, so the quotes are the same everywhere and it picks up new
+versions by itself (if it's already open when one goes live, just reload it).
+Nothing to download.
 
-- **Edge or Chrome on a computer:** open the website, go to **Settings → Use it
-  like a program → Install app**. (Or use the install icon at the right of the
-  address bar.) Right-click the icon in the taskbar to pin it.
+- **Edge or Chrome on a computer:** open the site and go to **Settings → Use it
+  like a program → Install app** (or click the install icon at the right of the
+  address bar). Right-click the taskbar icon to pin it.
 - **iPhone/iPad:** Safari → Share → **Add to Home Screen**.
 - **Android:** Chrome → ⋮ → **Add to Home screen**.
 
-To remove it, open the app, click ⋯ at the top, then **Uninstall**, or use
+To get rid of it, open the app, click ⋯ at the top, then **Uninstall**, or use
 Windows Settings → Apps.
 
 ### The Windows program (MeshQuotes.exe)
 
-There's also a real Windows program: **Settings → Use it like a program →
-download the Windows program**, or `/download/MeshQuotes.exe` on the website.
-It's about 1 MB, needs no installing (save it anywhere, double-click it), and
-opens the live website in its own window with a dark title bar and the Mesh
-icon. Like the installed app, it always shows the latest version and the same
+There's a proper Windows program too: **Settings → Use it like a program →
+download the Windows program**, or `/download/MeshQuotes.exe` on the site. It's
+about 1 MB and there's nothing to install (save it anywhere and double-click
+it). It opens the live site in its own window with a dark title bar and the
+Mesh icon. Like the installed app, it's always the latest version with the same
 quotes. Right-click its taskbar icon to pin it.
 
-- It uses Microsoft Edge WebView2, which is part of Windows 10 and 11. On a PC
-  without it, the program offers Microsoft's free download.
-- Links to other websites (store pages) open in your normal browser. Proposal
-  previews and PDFs open in a second Mesh Quotes window.
-- It isn't signed with a code-signing certificate, so Edge may say it "isn't
-  commonly downloaded" (choose **Keep**) and Windows may say it "protected your
-  PC" (choose **More info → Run anyway**). A certificate would remove those
+- It uses Microsoft Edge WebView2, which comes with Windows 10 and 11. If a PC
+  hasn't got it, the program offers Microsoft's free download.
+- Links to other websites (like store pages) open in your normal browser.
+  Proposal previews and PDFs open in a second Mesh Quotes window.
+- It isn't signed with a code-signing certificate, so Edge might say it “isn't
+  commonly downloaded” (pick **Keep**) and Windows might say it “protected your
+  PC” (pick **More info → Run anyway**). A certificate would get rid of those
   warnings.
-- Its sign-in and window position are kept in `%LOCALAPPDATA%\Mesh Quotes`.
+- Its sign-in and window position are saved in `%LOCALAPPDATA%\Mesh Quotes`.
 - The menu from the icon at the top left has **About Mesh Quotes**.
 
-To rebuild it after changing `desktop/MeshQuotes.cs` (only needed if the
-program itself changes, not the website):
+To rebuild it after changing `desktop/MeshQuotes.cs` (only needed if the program
+itself changes, not the website):
 
 ```
 powershell -ExecutionPolicy Bypass -File desktop\build.ps1
@@ -111,199 +116,219 @@ powershell -ExecutionPolicy Bypass -File desktop\build.ps1
 
 This uses the C# compiler that comes with Windows, downloads Microsoft's
 WebView2 kit from nuget.org the first time (checked against a fingerprint), and
-copies the new `MeshQuotes.exe` to `public\download\`. For testing,
-`MeshQuotes.exe --url=http://localhost:3000` opens your own copy instead of the
-website.
+copies the new `MeshQuotes.exe` into `public\download\`. For testing,
+`MeshQuotes.exe --url=http://localhost:3000` opens your local copy instead of
+the live site.
 
 ## Running it on your own computer
 
-You need [Node.js](https://nodejs.org) 18 or newer. There is nothing else to install.
+You need [Node.js](https://nodejs.org) 18 or newer. That's it, nothing else to
+install.
 
 - **Windows:** double-click `Start Mesh Quotes.bat`. It opens http://localhost:3000.
-- **Any system:** run `npm start` in this folder, then open http://localhost:3000.
+- **Anything else:** run `npm start` in this folder, then open http://localhost:3000.
 
-On your own computer, data is kept in the `data/` folder (not uploaded to GitHub),
-there's no password unless you set `TEAM_PASSWORD`, and **Download PDF** makes the
-PDF directly using Edge or Chrome.
+On your own computer, the data's kept in the `data/` folder (it never goes up to
+GitHub), there's no password unless you set `TEAM_PASSWORD`, and **Download
+PDF** makes the PDF straight away using Edge or Chrome.
 
-Private settings such as the Habitech key go in a file called `.env` in this
-folder (copy `.env.example`). It is never uploaded to GitHub.
+Private stuff like the Habitech key goes in a file called `.env` in this folder
+(copy `.env.example` to start). It never gets uploaded to GitHub.
 
 ## What it does
 
-- **Ubiquiti catalogue** – about 500 products read from https://uk.store.ui.com,
-  with images, options (lengths, colours, pack sizes) and prices excluding VAT.
-  Non-UK versions are hidden when a UK version exists.
-- **Surcharges** – some Ubiquiti products carry a surcharge (currently “Memory”)
-  that the store adds at checkout on top of the listed price. These are included
-  in quote prices by default; you can switch that off per quote.
-- **Sonos catalogue** – about 130 products read from the Sonos UK shop
-  (sonos.com/en-gb/shop), with pictures and colour options. Sonos shows prices
-  including VAT; they're stored ex VAT (÷ 1.2). Refurbished stock is left out.
-  The shop doesn't show trade prices, so set our trade discount off Sonos
-  prices (top of **Products → Sonos UK shop**, in Settings, or per quote under
-  **Pricing & terms**), or type our cost on a line. Refreshes daily, like
-  Ubiquiti.
-- **Crestron catalogue** – import Crestron's dealer price list (.xlsx) on
-  **Products → Crestron price list**. The “Alpha Listing” tab is read: the
-  MSRP is the selling price and the dealer price is our cost (both ex VAT).
-  Products marked “Contact for pricing” are left out. Import a newer list any
-  time; quotes keep their prices and show which lines have a new one.
-- **Habitech catalogue** – our Habitech trade account (about 10,700 products,
-  every brand Habitech sells us). The app keeps a copy of the whole list, so
-  **Products → Habitech** and **Add product → Habitech** show everything, with a
-  brand filter and instant search. The first copy takes about 3 minutes
-  (**Copy full list**; it also starts by itself overnight); after that it
-  refreshes every night (new and withdrawn products, prices and stock), or click
-  **Refresh now**. If nothing in the list matches a search, the app searches
-  Habitech directly. The price is Habitech's SRP and our cost is our trade price
-  (both ex VAT), with stock on each product. Today's price is checked when you
-  add a product, and quotes check their Habitech lines when you open them, flag
-  any new price, and show stock on each line. The client's proposal shows the
-  maker's part number, not Habitech's stock code. Products Habitech hasn't
-  priced for us aren't listed (email Habitech to add the brand). Needs the
-  Habitech API key (see *Connecting Habitech*).
-- **NetXL catalogue** – our NetXL trade account (about 4,300 networking and
-  phone products), read through NetXL's API and copied once a day (or click
-  **Refresh prices now** on **Products → NetXL**). The price is NetXL's RRP (our
-  cost where it has none) and our cost is our account's price for one unit,
-  both ex VAT. Stock and the next delivery date show on each product and on
-  quote lines, as of the last copy. NetXL's refurbished products count as
-  graded stock, so **Hide graded stock** hides them. Needs the NetXL API key
-  (see *Connecting NetXL*).
-- **Other manufacturers** – add a one-off item while quoting, or save products
-  to **Our products** to reuse them.
-- **Sorting and hiding** – in **Add product** and on the Products page, sort by
-  best match, price (low to high or high to low) or name, and switch on
+- **Ubiquiti** – about 500 products read from https://uk.store.ui.com, with
+  pictures, options (lengths, colours, pack sizes) and prices ex VAT. If there's
+  a UK version of something, the non-UK ones are hidden.
+- **Surcharges** – some Ubiquiti products have a surcharge (at the moment
+  “Memory”) that the store adds at checkout on top of the listed price. They're
+  included in quote prices by default, but you can turn that off per quote.
+- **Sonos** – about 130 products from the Sonos UK shop
+  (sonos.com/en-gb/shop), with pictures and colours. Sonos shows prices with
+  VAT, so they're stored ex VAT (÷ 1.2). Refurbished stock is left out. The shop
+  doesn't show trade prices, so set our trade discount off Sonos prices (top of
+  **Products → Sonos UK shop**, in Settings, or per quote under **Pricing &
+  terms**), or type our cost on a line. Refreshes every day, like Ubiquiti.
+- **Crestron** – import Crestron's dealer price list (.xlsx) on **Products →
+  Crestron price list**. It reads the “Alpha Listing” tab: the MSRP is the
+  selling price and the dealer price is our cost (both ex VAT). Anything marked
+  “Contact for pricing” is left out. Import a newer list whenever you like;
+  quotes keep their prices and show which lines have a new one.
+- **Habitech** – our Habitech trade account (about 10,700 products, every brand
+  Habitech sells us). The app keeps a copy of the whole list, so **Products →
+  Habitech** and **Add product → Habitech** show everything, with a brand filter
+  and instant search. The first copy takes about 3 minutes (**Copy full list**,
+  or it starts by itself overnight). After that it refreshes every night (new
+  and withdrawn products, prices and stock), or hit **Refresh now**. If nothing
+  in the list matches a search, it searches Habitech directly. The price is
+  Habitech's SRP and our cost is our trade price (both ex VAT), with stock on
+  every product. Today's price gets checked when you add a product, and quotes
+  check their Habitech lines when you open them, flag any new prices and show
+  stock on each line. The client's proposal shows the maker's part number, not
+  Habitech's stock code. Anything Habitech hasn't priced for us isn't listed
+  (email Habitech to add the brand). Needs the Habitech key (see *Connecting
+  Habitech*).
+- **NetXL** – our NetXL trade account (about 4,300 networking and phone
+  products), read through NetXL's API and copied once a day (or click **Refresh
+  prices now** on **Products → NetXL**). The price is NetXL's RRP (or our cost
+  if there isn't one) and our cost is our account's price for one unit, both ex
+  VAT. Stock and the next delivery date show on each product and on quote lines,
+  as of the last copy. NetXL's refurbished stuff counts as graded stock, so
+  **Hide graded stock** hides it. Needs the NetXL key (see *Connecting NetXL*).
+- **Other manufacturers** – add a one-off item while you're quoting, or save
+  products to **Our products** so you can reuse them.
+- **Sorting and hiding** – in **Add product** and on the Products page you can
+  sort by best match, price (low to high or high to low) or name, and switch on
   **Hide graded stock** (Habitech's “Grade A/B/C” and refurbished items) or
   **Hide out of stock** (sold out at Ubiquiti or Sonos, out of stock at
-  Habitech). Each switch shows how many products it hides, and each computer
-  remembers the choices.
+  Habitech). Each switch shows how many products it's hiding, and each computer
+  remembers what you picked.
 - **Your own tab order** – drag the catalogue tabs (Ubiquiti, Sonos, NetXL…)
   along the bar in **Add product** or on the Products page, or use **More** (or
   **⋯**) → **Arrange tabs**, which works on phones too. Tabs that don't fit go
-  under **More**. Each computer remembers its own order, the same on both
-  screens, and opens on the first tab. **Reset to the usual order** puts it back.
-- **Our own product names** – give a catalogue product the name clients
-  should see, e.g. the Ubiquiti UCG-Max as “Home network router”. Rename a line
-  on a quote and click **Always use this name for this product**, or use
-  **Rename** on the Products page. From then on it's added to quotes with that
-  name, with any colour or option after it (“Kitchen speaker (White)”), and
-  searching for the name finds it. Quotes that already have it keep their
-  name. To show only the name on proposals, untick **Manufacturer and model
-  numbers** under **Pricing & terms → What the proposal shows**.
+  under **More**. Each computer remembers its own order (the same on both
+  screens) and opens on the first tab. **Reset to the usual order** puts it back.
+- **Our own product names** – give a catalogue product the name clients should
+  see, like the Ubiquiti UCG-Max as “Home network router”. Rename a line on a
+  quote and click **Always use this name for this product**, or use **Rename**
+  on the Products page. From then on it goes onto quotes with that name, with
+  any colour or option after it (“Kitchen speaker (White)”), and searching for
+  the name finds it. Quotes that already have it keep their name. To show only
+  the name on proposals, untick **Manufacturer and model numbers** under
+  **Pricing & terms → What the proposal shows**.
 - **Habitech basket** – on a quote with Habitech products, click **Add to
-  Habitech basket** (under the profit panel). Tick what to order and change
-  quantities if you need to (the quote isn't changed), then click **Open
-  Habitech basket**. Habitech's website opens in a new tab with them in your
-  basket, added to anything already there, and you check out as normal. Sign
-  in to Habitech in that browser first to see our prices. The same product in
-  several areas is ordered as one line. Products Habitech's website doesn't sell
-  (services, custom-made items, licences) are listed to order by phone or
-  email. Tip: use the quote number as the PO number at checkout.
+  Habitech basket** (on the right of the quote, under the team notes). Tick what
+  you want to order and change quantities if you need to (the quote doesn't
+  change), then click **Open Habitech basket**. Habitech's website opens in a
+  new tab with it all in the basket, on top of anything already there, and you
+  check out like normal. Sign in to Habitech in that browser first so you see
+  our prices. If the same product's in a few areas, it's ordered as one line.
+  Anything Habitech's website doesn't sell (services, custom-made stuff,
+  licences) gets listed so you can order it by phone or email. Tip: use the
+  quote number as the PO number at checkout.
 - **Labour** – Installation, Commissioning, Programming and Project management
-  (add more in Settings). Add labour to any product as hours *per unit*, so it
-  scales with quantity, or add a standalone labour line to an area.
-- **Areas** – group the quote by room or system, each with its own description.
-- **Proposal text** – an introduction plus your own sections. Blank line = new
+  (add more in Settings). Put labour on any product as hours *per unit*, so it
+  goes up with the quantity, or add a standalone labour line to an area.
+- **Areas** – split the quote up by room or system, each with its own
+  description.
+- **Proposal text** – an intro plus your own sections. Blank line = new
   paragraph, `- ` = bullet, `**bold**`.
-- **Pricing** – edit any unit price, apply a markup to Ubiquiti store prices, set
-  labour rates and VAT per quote. Lines whose catalogue price has changed are
-  flagged.
-- **Discounts** – a percentage off any item, and a percentage or fixed amount off
-  the whole quote, with your own name for it (e.g. “Package saving”). The
-  proposal shows what the client saves.
-- **Profit** – a panel only your team sees: profit and margin on equipment and
-  labour. Set what labour costs you per hour in Settings, and your trade
-  discounts off Ubiquiti and Sonos prices at the top of their tabs on the
-  Products page (or in Settings). New quotes use them; each quote can change
-  them under **Pricing & terms**. Crestron and Habitech bring their own trade
-  prices. Type a cost on any item to override.
-- **Kits** – save an area’s items and labour as a kit (e.g. “Standard WiFi
+- **Pricing** – change any unit price, put a markup on Ubiquiti store prices,
+  and set labour rates and VAT per quote. Lines where the catalogue price has
+  changed get flagged.
+- **Discounts** – a percentage off any item, and a percentage or fixed amount
+  off the whole quote with your own name for it (e.g. “Package saving”). The
+  proposal shows the client how much they're saving.
+- **Profit** – a panel only we see: profit and margin on equipment and labour.
+  Set what labour costs us per hour in Settings, and our trade discounts off
+  Ubiquiti and Sonos prices at the top of their tabs on the Products page (or in
+  Settings). New quotes use them, and each quote can change them under
+  **Pricing & terms**. Crestron, Habitech and NetXL bring their own trade
+  prices. Type a cost on any item to override it.
+- **Low-margin warning** – any line we'd sell for less than it costs us gets a
+  red “Below cost” tag, and any line under the margin in Settings (**Warn when
+  a line's margin is under**, 25% to start with) gets an amber one, like “Only
+  12% margin”. Click the tag to see our cost. There's a note at the top of the
+  quote and in the profit panel too, and **Copy client link** asks “Check the
+  margins first?” once before it goes out. Empty the Settings box and only
+  below-cost lines get flagged. Lines with no known cost aren't flagged. All of
+  it hides when you hide the profit panel, in case a client can see your screen.
+- **Cheaper supplier** – if another supplier has the same product (same maker
+  part number, e.g. a U7 Pro at the Ubiquiti store and at Habitech), the line
+  says so when it'd save us money: “Cheaper at Habitech: £146.70 each, saves us
+  £7.30 each”, with stock and a **Switch** button. **Our cost** on a line lists
+  every supplier that has it. Switching keeps the client's price the same (the
+  **Reset to** link under the price goes to the new supplier's price), and you
+  can switch back the same way. It also helps when we don't know a cost, like
+  Sonos with no trade discount set: “Habitech has it for £116.89 each”. It
+  compares the Ubiquiti store, Sonos, NetXL, Crestron and Habitech (last night's
+  copy of Habitech's list), and leaves out refurbished stock and bundles.
+- **Kits** – save an area's items and labour as a kit (e.g. “Standard WiFi
   room”) and add it to any quote in one click from **Add product → Kits**.
-- **Team notes** – a box on the right of every quote (below the profit panel;
-  at the bottom on a phone) for things only your team needs, like a gate code,
-  parking or the best time to call. They're never on the proposal, PDF or
-  client link, editing them doesn't change the revision number, and going back
-  to an earlier version keeps today's notes. Duplicating a quote copies them.
-- **Versions** – a version is saved when you send the link and when the client
-  replies; save your own any time. See what changed since any version, or go
-  back to it.
-- **Proposal layout** – list every item with prices, or show only what’s in each
+- **Team notes** – a box on the right of every quote (under the profit panel,
+  or near the bottom on a phone) for stuff only we need to know, like a gate
+  code, parking or the best time to call. They never show on the proposal, PDF
+  or client link, editing them doesn't change the revision number, and going
+  back to an earlier version keeps today's notes. Duplicating a quote copies
+  them over.
+- **Versions** – a version gets saved when you send the link and when the client
+  replies, and you can save your own whenever. You can see what's changed since
+  any version, or go back to it.
+- **Proposal layout** – list every item with prices, or just show what's in each
   area with one price per area. Each area ends with its own labour and services
-  (Installation, Commissioning…, with a total for each), or choose “In one
-  section after the areas” under **Pricing & terms → What the proposal shows**.
-  A line (starting in Mesh blue) separates each area from the next. The
-  **Investment summary** shows only the total excluding VAT, the VAT and the
-  total including VAT, plus the whole-quote discount (e.g. “Package saving”)
-  when there is one.
-- **Front cover** – new proposals start with our cover page (the house at
-  night, with the Client, Project, Date and Revision boxes filled in), then
-  the title, dates and price at the top of page 2. The boxes widen to fit
-  longer names. **Revision** counts the different versions sent to the
-  client: 1 for the first, 2 once you change it (and re-send it), and so on;
-  copying the link again without changes doesn't count. To fit a small quote on
+  (Installation, Commissioning…, with a total for each), or pick “In one section
+  after the areas” under **Pricing & terms → What the proposal shows**. A line
+  (starting in Mesh blue) separates each area from the next. The **Investment
+  summary** only shows the total ex VAT, the VAT and the total inc VAT, plus the
+  whole-quote discount (e.g. “Package saving”) if there is one.
+- **Front cover** – new proposals start with our cover page (the house at night,
+  with the Client, Project, Date and Revision boxes filled in), then the title,
+  dates and price at the top of page 2. The boxes get wider for longer names.
+  **Revision** counts the different versions sent to the client: 1 for the
+  first, 2 once you change it (and send it again), and so on. Copying the link
+  again without changing anything doesn't count. To get a small quote onto
   fewer pages, untick **Front cover** under **Pricing & terms → What the
-  proposal shows**; for all new quotes, untick it in Settings. Quotes made
+  proposal shows**, or untick it in Settings for all new quotes. Quotes made
   before the front cover keep their old look. The picture,
   `public/img/proposal-cover.jpg`, was made from the designer's
   `mesh-NewFC-210x297.pdf` (300 dpi, without its four white boxes).
-- **Developer options** – search the team's secret word on the **Habitech** tab
-  (in **Add product** or on the Products page) and a **Dev** page appears on
-  that computer, with an amber **Dev** link at the top. It shows the version
-  that's running, where data is saved, which private settings are set (never
-  their values), each catalogue's last update and any problem, and the nightly
-  job's last results. It can test the Habitech and NetXL connections, run the
-  nightly job or refresh every catalogue (type **RUN** to confirm), download a
-  backup of all quotes, settings, kits and names (download only), and reset the
-  choices this computer remembers (type **RESET**). **Switch off on this
-  computer** hides it again. The word only hides the page: anyone signed in can
-  already do these things, and nothing on it deletes data. Only a fingerprint of
-  the word is in the code (`DEV_WORD_HASH` in `public/app.js`), as the code is
-  public.
-- **Two people** – if you both edit the same quote at once, the second person to
-  save is warned and can load the other’s changes or keep their own.
+- **Developer options** – search the secret word on the **Habitech** tab (in
+  **Add product** or on the Products page) and a **Dev** page shows up on that
+  computer, with an amber **Dev** link at the top. It shows which version's
+  running, where the data's saved, which private settings are set (never what
+  they are), when each catalogue last updated and any problems, and the nightly
+  job's last results. From there you can test the Habitech and NetXL
+  connections, run the nightly job or refresh every catalogue (type **RUN** to
+  confirm), download a backup of all the quotes, settings, kits and names
+  (download only), and reset what this computer remembers (type **RESET**).
+  **Switch off on this computer** hides it again. The word only hides the page:
+  anyone signed in can already do all of this, and nothing on it deletes data.
+  Only a fingerprint of the word is in the code (`DEV_WORD_HASH` in
+  `public/app.js`), because the code's public.
+- **Two people at once** – if two of us edit the same quote at the same time,
+  whoever saves second gets warned and can load the other person's changes or
+  keep their own.
 - **Look** – styled like the Mesh website, with a light and a dark mode (the
-  light switch, top right). Animations switch off on devices set to reduce motion.
+  light switch, top right). Animations turn off on devices set to reduce motion.
 
-## Where things are
+## Where stuff is
 
 | Path | What it is |
 | --- | --- |
-| `lib/app.js` | All routes; shared by the local server and Vercel |
+| `lib/app.js` | All the routes, used by both the local server and Vercel |
 | `server.js` | Runs the app on your own computer |
 | `api/index.js`, `vercel.json` | Runs the app on Vercel |
 | `lib/auth.js` | Team password sign-in |
 | `lib/store.js`, `lib/storage/` | Saving data (files locally, Upstash online) |
 | `lib/catalogues/ubiquiti.js` | Reads the Ubiquiti UK store |
 | `lib/catalogues/sonos.js` | Reads the Sonos UK shop |
-| `lib/catalogues/crestron.js`, `lib/xlsx.js` | Imports Crestron’s dealer price list (.xlsx) |
-| `lib/catalogues/habitech.js` | Searches Habitech and checks prices through Habitech’s API |
-| `lib/catalogues/netxl.js` | Copies the NetXL catalogue daily through NetXL’s API |
+| `lib/catalogues/crestron.js`, `lib/xlsx.js` | Imports Crestron's dealer price list (.xlsx) |
+| `lib/catalogues/habitech.js` | Searches Habitech and checks prices through Habitech's API |
+| `lib/catalogues/netxl.js` | Copies the NetXL catalogue every day through NetXL's API |
 | `lib/env.js`, `.env.example` | Reads private settings from `.env` on your own computer |
-| `lib/proposal.js`, `public/proposal.css` | The client-facing proposal |
+| `lib/proposal.js`, `public/proposal.css` | The proposal the client sees |
 | `public/img/proposal-cover.jpg` | The proposal's front cover picture |
 | `lib/client.js` | Client views and replies (accept, changes, decline) |
 | `lib/revisions.js`, `lib/kits.js` | Saved versions of quotes, and kits |
 | `lib/names.js` | Our own names for catalogue products |
-| `lib/dev.js` | The Dev page's server side: system info, connection tests, jobs and the backup |
+| `lib/dev.js` | The server side of the Dev page: system info, connection tests, jobs and the backup |
 | `lib/habitech-basket.js` | Finds a quote's Habitech products on Habitech's website, for **Add to Habitech basket** |
-| `lib/pdf.js` | One-click PDF via Edge/Chrome (local only) |
-| `public/app.js`, `public/styles.css` | The quoting app |
-| `public/shared/calc.js` | Pricing maths, shared by app and proposal |
+| `lib/pdf.js` | One-click PDF via Edge/Chrome (only on your own computer) |
+| `public/app.js`, `public/styles.css` | The quoting app itself |
+| `public/shared/calc.js` | The pricing maths, shared by the app and the proposal |
 | `public/shared/mesh-nodes.js` | The moving nodes at the top of each page and on the sign-in page |
 | `public/manifest.webmanifest`, `public/img/app-icon-*.png` | Lets the site be installed as an app (name, icon, own window) |
 | `desktop/` | The Windows program: `MeshQuotes.cs`, its icon, and `build.ps1`, which builds `public/download/MeshQuotes.exe` |
 
-## Adding another manufacturer later
+## Adding another supplier
 
-Create a file in `lib/catalogues/`, then list it in `lib/catalogue.js`:
+Make a file in `lib/catalogues/`, then add it to `lib/catalogue.js`:
 
 - **Read from a website** (like `ubiquiti.js`, `sonos.js`): export
   `{ id, name, label, tabName, site, sync() }`, where `sync()` returns products
-  in the same shape, and add it to `SOURCES`. It refreshes daily. A supplier
-  whose API returns its whole catalogue quickly (like `netxl.js`) works the same
-  way; add `configured()` and `keyName` so it waits until its key is set up.
+  in the same shape, and add it to `SOURCES`. It refreshes every day. A supplier
+  whose API gives you its whole catalogue quickly (like `netxl.js`) works the
+  same way; add `configured()` and `keyName` so it waits until its key is set up.
 - **Imported from a price list file** (like `crestron.js`): export
   `{ id, name, label, tabName, importFile(buffer, fileName) }` and add it to
   `IMPORTED`. `lib/xlsx.js` reads Excel files.
@@ -311,61 +336,72 @@ Create a file in `lib/catalogues/`, then list it in `lib/catalogue.js`:
   export `{ id, name, label, tabName, configured(), search(q, offset),
   product(sku), prices(skus), status(), startCopy(), continueCopy(job,
   deadline), finishCopy(job), refreshCopy(copy, deadline) }` and add it to
-  `LIVE`. The copy is made in chunks that fit Vercel's one-minute limit.
+  `LIVE`. The copy's made in chunks that fit inside Vercel's one-minute limit.
 
-The Products page and the product picker show a tab for each one automatically.
+The Products page and the product picker get a tab for each one automatically.
 
-## Rolling back to an earlier version
+## Going back to an older version
 
-Each release is tagged on GitHub (the repo’s **Tags** list):
+Every release has a tag on GitHub (the repo's **Tags** list):
 
 | Tag | What it is |
 | --- | --- |
 | `v1` | Before discounts, profit, client replies, view tracking, versions and kits |
-| `v2` | Adds those features |
-| `v3-before-2-pages` | Lighter, simpler design, still with a full cover page |
-| `v3` | Lighter, simpler proposal and PDF design (no dark panels), printing on fewer pages: the cover details sit on page 1, with an optional separate cover page |
-| `v3.1` | Adds “Start again from 0001” in Settings, to reset quote numbers (and optionally delete all quotes) after testing |
-| `v3.2` | The quoting app restyled to match the Mesh website (navy header, page tops with moving nodes, Inter and Poppins), smoother light/dark switching and animations throughout, and no box around clicked tick boxes |
-| `v3.3` | The client proposal in the website’s colours (navy top bar and moving nodes on screen; printing stays light), the Labour section shows only each service and its total (no hours or hourly rates), and **Download PDF** works again on your own computer |
-| `v4` | More catalogues: Sonos (read daily from the Sonos UK shop) and Crestron (import the dealer price list .xlsx; MSRP = price, dealer = our cost). Markup and trade discount now apply to Ubiquiti only. Rolling back to `v3.3` hides Sonos and Crestron products, but quote lines already added keep their prices |
-| `v4.1` | Habitech catalogue (search Habitech live with our trade prices and stock; needs `HABITECH_API_KEY` in Vercel), each area’s labour shown at the bottom of that area in proposals, and a Sonos trade discount alongside the Ubiquiti one, both at the top of their Products tabs. Rolling back to `v4` hides Habitech products and puts labour back in one section, but quote lines already added keep their prices |
-| `v4.2` | The Habitech tab lists every product (a copy of the whole list, refreshed nightly) with a brand filter and instant search, falling back to searching Habitech when nothing matches. Today’s price is checked when you add a Habitech product. Rolling back to `v4.1` goes back to search-only (the saved copy is simply ignored) |
-| `v4.3` | Use it like a program: the website can be installed as an app (own window and icon, from **Settings → Use it like a program**), and a Windows program, `MeshQuotes.exe`, can be downloaded from the same place. Rolling back to `v4.2` removes the install option and the download, but copies of the program people already have keep working |
-| `v4.4` | Sort products by price (low to high, high to low) or name, switches to hide graded stock and out-of-stock products, and our own names for catalogue products (e.g. UCG-Max added as “Home network router”). Rolling back to `v4.3` removes these; quote lines keep the names they were given, and the saved names come back when you move forward again |
-| `v4.5` | **Add to Habitech basket** on quotes (tick a quote's Habitech products and open Habitech's website with them in your basket), and the new **front cover** (the house picture with Client, Project, Date and Revision) on new proposals, replacing the old "Separate cover page". Rolling back to `v4.4` removes both: proposals start with their title again, and quotes that had the old separate cover page get it back |
-| `v4.6` | The NetXL catalogue (needs `NETXL_API_KEY` in Vercel). Proposals: a line between each area, and the investment summary shows only the totals (no equipment and labour breakdown). The Quotes page loses its old “Ubiquiti UK catalogue” subheading. Rolling back to `v4.5` hides NetXL products (quote lines already added keep their prices) and brings the rest back; nothing is lost |
-| `v4.7` | Printed proposals: white page margins even when printed from the Windows program (they were dark navy), no browser date and title line at the top, and the company footer never on a page of its own. Catalogue tabs can be dragged into your own order, with a **More** menu for those that don't fit. Rolling back to `v4.6` brings back the old print and fixed tabs; the saved tab order is just ignored |
-| `v4.8` | Developer options: a **Dev** page opened by searching a secret word on the Habitech tab (system info, connection tests, run jobs, backup download, reset this computer). Rolling back to `v4.7` removes it; nothing else changes |
-| `v4.9` | **Team notes** on the right of every quote (moved from the bottom of Pricing & terms; never on the proposal, and editing them no longer changes the revision number), the right-hand column scrolls on its own when it's taller than the window, and the proposal preview has no "Back to editor" button. Rolling back to `v4.8` puts the notes box back under Pricing & terms (the notes are kept) and brings the button back |
+| `v2` | Adds all of those |
+| `v3-before-2-pages` | The lighter, simpler design, still with a full cover page |
+| `v3` | Lighter, simpler proposal and PDF design (no dark panels) that prints on fewer pages: the cover details sit on page 1, with an optional separate cover page |
+| `v3.1` | Adds “Start again from 0001” in Settings, to reset the quote numbers (and delete all the quotes if you want) after testing |
+| `v3.2` | The quoting app restyled to match the Mesh website (navy header, moving nodes at the top of the pages, Inter and Poppins), smoother light/dark switching and animations all over, and no box around tick boxes when you click them |
+| `v3.3` | The client proposal in the website's colours (navy top bar and moving nodes on screen; printing stays light), the Labour section only shows each service and its total (no hours or hourly rates), and **Download PDF** works again on your own computer |
+| `v4` | More catalogues: Sonos (read every day from the Sonos UK shop) and Crestron (import the dealer price list .xlsx; MSRP = price, dealer = our cost). Markup and trade discount only apply to Ubiquiti now. Going back to `v3.3` hides Sonos and Crestron products, but quote lines already added keep their prices |
+| `v4.1` | The Habitech catalogue (search Habitech live with our trade prices and stock; needs `HABITECH_API_KEY` in Vercel), each area's labour at the bottom of that area in proposals, and a Sonos trade discount next to the Ubiquiti one, both at the top of their Products tabs. Going back to `v4` hides Habitech products and puts labour back in one section, but quote lines already added keep their prices |
+| `v4.2` | The Habitech tab lists every product (a copy of the whole list, refreshed every night) with a brand filter and instant search, and searches Habitech itself when nothing matches. Today's price is checked when you add a Habitech product. Going back to `v4.1` means search-only again (the saved copy just gets ignored) |
+| `v4.3` | Use it like a program: the website can be installed as an app (own window and icon, from **Settings → Use it like a program**), and there's a Windows program, `MeshQuotes.exe`, to download from the same place. Going back to `v4.2` removes the install option and the download, but copies of the program people already have keep working |
+| `v4.4` | Sort products by price (low to high, high to low) or name, switches to hide graded and out-of-stock products, and our own names for catalogue products (e.g. the UCG-Max added as “Home network router”). Going back to `v4.3` removes these; quote lines keep the names they were given, and the saved names come back when you move forward again |
+| `v4.5` | **Add to Habitech basket** on quotes (tick a quote's Habitech products and open Habitech's website with them in your basket), and the new **front cover** (the house picture with Client, Project, Date and Revision) on new proposals, replacing the old “Separate cover page”. Going back to `v4.4` removes both: proposals start with their title again, and quotes that had the old separate cover page get it back |
+| `v4.6` | The NetXL catalogue (needs `NETXL_API_KEY` in Vercel). Proposals get a line between each area, and the investment summary only shows the totals (no equipment and labour breakdown). The Quotes page loses its old “Ubiquiti UK catalogue” subheading. Going back to `v4.5` hides NetXL products (quote lines already added keep their prices) and brings the rest back; nothing's lost |
+| `v4.7` | Printed proposals: white page margins even when printed from the Windows program (they were dark navy), no browser date and title line at the top, and the company footer never on a page on its own. Catalogue tabs can be dragged into your own order, with a **More** menu for the ones that don't fit. Going back to `v4.6` brings back the old printing and fixed tabs; the saved tab order just gets ignored |
+| `v4.8` | Developer options: a **Dev** page you open by searching a secret word on the Habitech tab (system info, connection tests, run jobs, backup download, reset this computer). Going back to `v4.7` removes it; nothing else changes |
+| `v4.9` | **Team notes** on the right of every quote (moved from the bottom of Pricing & terms; never on the proposal, and editing them doesn't change the revision number any more), the right-hand column scrolls on its own when it's taller than the window, and the proposal preview has no “Back to editor” button. Going back to `v4.8` puts the notes box back under Pricing & terms (the notes are kept) and brings the button back |
+| `v5` | **Low-margin warning** (lines below cost or under the margin in Settings get flagged, and Copy client link asks you to check them first) and **Cheaper supplier** (lines show when another supplier has the same part for less, with a Switch button that keeps the client's price). The README's rewritten too. Going back to `v4.9` removes both; lines you've already switched stay with their new supplier |
 
-- **Quickest, in Vercel:** open the project → **Deployments**, find the deployment
-  of the older version, click **⋯** → **Instant Rollback** (or **Promote**). It’s
-  live in seconds and the code isn’t changed. Undo it the same way.
-- **Permanent, in GitHub:** undo everything after the version you want, e.g.
+- **Quickest, in Vercel:** open the project → **Deployments**, find the
+  deployment of the older version and click **⋯** → **Instant Rollback** (or
+  **Promote**). It's live in seconds and the code isn't touched. Undo it the
+  same way.
+- **For good, in GitHub:** undo everything after the version you want, e.g.
   `git revert --no-edit v2..HEAD` to go back to `v2` (or `v1..HEAD` for `v1`),
   then `git push`. Vercel then deploys that version. To move forward again,
   revert those reverts.
 
-Rolling back deletes nothing. The older version ignores the newer information
-(client replies, views, saved versions, kits, labour costs) and it reappears when
-you move forward again. While on `v1`, quotes with a discount show without it,
-and a quote marked “Changes requested” shows no status until you pick one.
+Going back doesn't delete anything. The older version just ignores the newer
+stuff (client replies, views, saved versions, kits, labour costs), and it all
+comes back when you move forward again. While you're on `v1`, quotes with a
+discount show without it, and a quote marked “Changes requested” shows no
+status until you pick one.
 
-## Known limits of this proof of concept
+## Stuff it can't do yet
 
-- Ubiquiti and Sonos data is read from their shops’ public pages. If either
-  changes their site, or blocks requests from Vercel’s servers, the price refresh
-  stops working (the last good copy is kept and the Products page shows the error).
-- NetXL prices and stock are copied once a day, so stock shown on a quote can
-  be up to a day old; NetXL's website has the live figure.
-- The Habitech list is a copy, refreshed nightly, so a product added to
-  Habitech today may not be listed until tomorrow (search for its exact part
-  code and, if the list has no match, the app finds it straight from Habitech). If Habitech’s API is down, the copy still works
-  and quote lines keep their prices.
-- **Add to Habitech basket** uses a link that Habitech's website accepts, not
-  Habitech's API (which can only read, not fill a basket). If Habitech change
-  their website it may stop working; nothing else in the app is affected.
-- One shared team password, no individual accounts.
+- Ubiquiti and Sonos are read from their shops' public pages. If either of them
+  changes their site, or blocks requests from Vercel's servers, the price
+  refresh stops working (the last good copy is kept and the Products page shows
+  the error).
+- NetXL prices and stock are copied once a day, so the stock on a quote can be
+  up to a day old; NetXL's website has the live number.
+- The Habitech list is a copy that's refreshed every night, so something
+  Habitech added today might not show until tomorrow (search for its exact part
+  code and, if the list hasn't got it, the app finds it straight from
+  Habitech). If Habitech's API goes down, the copy still works and quote lines
+  keep their prices.
+- **Add to Habitech basket** uses a link Habitech's website accepts, not their
+  API (which can only read, not fill a basket). If Habitech change their
+  website it might stop working, but nothing else in the app is affected.
+- **Cheaper supplier** only spots a match when both suppliers use the maker's
+  part number (Habitech's “mpn”, Ubiquiti's and Sonos's own codes). NetXL only
+  gives its own product code, which is usually the maker's, but that hasn't
+  been checked against real NetXL data yet (it needs the NetXL key). If two
+  suppliers write a code differently it won't spot them.
+- One shared team password, no separate accounts.
 - Quotes made on your own computer stay there; the online version starts empty.
-- Default labour rates and terms are placeholders – set your own in Settings.
+- The default labour rates and terms are just placeholders, so set your own in
+  Settings.

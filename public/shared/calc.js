@@ -228,6 +228,16 @@
     return Boolean(until) && today > until;
   }
 
+  // A maker's part number cut down to letters and digits, to spot the same
+  // product at two suppliers ("UDM-Pro" and "UDM PRO" are both "udmpro").
+  // Bundles ("A / B", "A + B") and very short codes don't count.
+  function partKey(code) {
+    const s = String(code || '').trim();
+    if (!s || /[/+,&]/.test(s)) return '';
+    const key = s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    return key.length >= 4 ? key : '';
+  }
+
   const gbp = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' });
   function money(pence) {
     return gbp.format(num(pence) / 100);
@@ -254,6 +264,7 @@
     quoteTotals,
     validUntil,
     isExpired,
+    partKey,
     money,
     hours,
   };

@@ -338,6 +338,7 @@ small { font-size: 12px; }
 
 .notice { background: var(--blue-soft); color: var(--notice-text); border: 1px solid var(--blue-line); border-radius: 12px; padding: 11px 16px; margin-bottom: 16px; font-size: 13.5px; }
 .notice.slim { margin: 14px 0 0; }
+.notice.warn { background: var(--amber-soft); color: var(--amber); border-color: transparent; }
 .hint { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; }
 .empty { padding: 32px; text-align: center; color: var(--muted); }
 
@@ -646,6 +647,13 @@ table.list .strong { font-family: var(--font-head); font-weight: 500; letter-spa
 .mini-field input { width: 64px; padding: 3px 6px; font-size: 12.5px; text-align: center; border-radius: 8px; }
 .mini-field .money-input { width: 110px; border-radius: 8px; }
 .l-extras.internal { padding: 5px 10px; border-radius: 10px; background: var(--panel-2); border: 1px dashed var(--input-border); }
+
+/* The same product at another supplier. */
+.supplier-hint { margin-top: 6px; font-size: 12.5px; color: var(--blue-text); background: var(--blue-soft); display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 3px 10px; border-radius: 8px; }
+.other-suppliers { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding-top: 4px; border-top: 1px solid var(--line); }
+.other-suppliers .offer { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.other-suppliers .stock, .supplier-hint .stock { white-space: nowrap; }
+.other-suppliers .offer b { font-weight: 600; color: var(--text); }
 .l-total s.was { display: block; font-weight: 400; font-size: 11.5px; color: var(--muted); }
 
 .labour-row { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
@@ -733,6 +741,17 @@ table.rates th small { text-transform: none; letter-spacing: 0; font-weight: 400
 .margin-bar.loss span { background: var(--red); }
 .profit .sum-sub { padding-left: 0; }
 .profit-note { font-size: 11.5px; color: var(--muted); margin: 8px 0 0; }
+.profit-note.warn { color: var(--amber); }
+
+/* Lines sold below cost (red) or under the margin in Settings (amber). */
+.margin-flag { font: inherit; font-size: 11px; font-weight: 600; padding: 0 8px; border: 0; border-radius: 99px; cursor: pointer; }
+.margin-flag.thin { background: var(--amber-soft); color: var(--amber); }
+.margin-flag.loss { background: var(--red-soft); color: var(--red); }
+.send-check { list-style: none; margin: 12px 0 0; padding: 0; font-size: 13.5px; max-height: 300px; overflow-y: auto; }
+.send-check li { display: flex; justify-content: space-between; gap: 14px; padding: 7px 0; border-top: 1px solid var(--line); }
+.send-check li b { flex: none; font-weight: 600; font-size: 12.5px; }
+.send-check .thin { color: var(--amber); }
+.send-check .loss { color: var(--red); }
 .show-profit { display: block; margin: -6px 0 16px 4px; }
 .side-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
 .side-actions .span-2 { grid-column: 1 / -1; }
