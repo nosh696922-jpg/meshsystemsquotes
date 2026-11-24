@@ -13,9 +13,12 @@ It's still a proof of concept, so there are a few rough edges (see
 You'll need a free [Vercel](https://vercel.com) account. It takes about 10 minutes.
 
 1. **Import the project.** In Vercel, click **Add New → Project**, connect GitHub
-   if it asks, and import **meshsystemsquotes**. Leave the settings alone
-   (Framework Preset: *Other*) and hit **Deploy**. The first deploy shows a “one
-   more setup step” message. That's fine, it's meant to.
+   if it asks, and import **quotetool** (on the meshsystemsuk GitHub account).
+   Leave the settings alone (Framework Preset: *Other*) and hit **Deploy**. The
+   first deploy shows a “one more setup step” message. That's fine, it's meant to.
+   (On Vercel's free plan a private repo only deploys commits made by the
+   account that owns it, so commits need to come from meshsystemsuk, or Vercel
+   says “Deployment Blocked”.)
 2. **Add a database** (it's where the quotes live). In the project, go to
    **Storage → Create Database** (or *Browse Marketplace*), pick
    **Upstash → Upstash for Redis**, the free plan and a London/Europe region, and
