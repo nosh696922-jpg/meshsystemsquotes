@@ -1596,6 +1596,7 @@ const QuotesList = {
     settings() {
       return state.settings;
     },
+    eventTick: () => clientEvents.tick,
     filtered() {
       const q = this.search.trim().toLowerCase();
       return this.quotes.filter(
@@ -1618,6 +1619,16 @@ const QuotesList = {
     },
     won() {
       return this.quotes.filter((q) => q.status === 'accepted').reduce((s, q) => s + q.subtotal, 0);
+    },
+  },
+  watch: {
+    // A client opened or replied to something: show it in the list.
+    async eventTick() {
+      try {
+        this.quotes = await api('GET', '/api/quotes');
+      } catch {
+        /* the list just stays as it was */
+      }
     },
   },
   async mounted() {
@@ -1771,6 +1782,7 @@ const QuoteEditor = {
     settings() {
       return state.settings;
     },
+    eventTick: () => clientEvents.tick,
     totals() {
       return this.quote ? C.quoteTotals(this.quote) : null;
     },
@@ -1978,6 +1990,10 @@ const QuoteEditor = {
       clearTimeout(this.matchTimer);
       this.matchTimer = setTimeout(() => this.loadHabitechMatches(), 600);
     },
+    // A pop-up about this quote: catch up with the client's view or reply.
+    eventTick() {
+      if (this.quote && clientEvents.latest.some((e) => e.quoteId === this.quote.id)) this.loadActivity(true);
+    },
   },
   async mounted() {
     loadCatalogue();
@@ -2076,7 +2092,8 @@ const QuoteEditor = {
       this.saveState = 'unsaved';
       this.saveNow();
     },
-    async loadActivity() {
+    // quiet: a pop-up has already said so.
+    async loadActivity(quiet = false) {
       try {
         const activity = await api('GET', `/api/quotes/${this.quote.id}/activity`);
         const latest = activity.responses[0];
@@ -2085,7 +2102,7 @@ const QuoteEditor = {
         // The client replied while this was open: show their reply now.
         if (latest && latest.id !== this.quote.clientResponse?.id && this.saveState === 'saved' && !this.saving) {
           this.setQuote(await api('GET', `/api/quotes/${this.quote.id}`));
-          if (isNew) toast(`${REPLY_LABELS[latest.action]} by ${latest.name}`);
+          if (isNew && !quiet) toast(`${REPLY_LABELS[latest.action]} by ${latest.name}`);
           if (this.revisions) this.loadRevisions();
         }
       } catch {
@@ -3464,10 +3481,151 @@ const ProductsPage = {
   </div>`,
 };
 
+// ---- Logins (Settings) --------------------------------------------------------
+// Everyone's own sign-in. Adding, resetting or removing one needs the owner key
+// (TEAM_PASSWORD), typed in here unless you signed in with it. The server
+// checks it; this only decides whether to ask.
+
+// A password that's easy to read out: four groups of letters and digits with
+// no look-alikes (0/O, 1/l/I), e.g. "k7mq-x3vd-9tpa-r2hw" (about 79 bits).
+function makePassword() {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  const out = [];
+  while (out.length < 16) {
+    for (const b of crypto.getRandomValues(new Uint8Array(32))) {
+      if (b < 248 && out.length < 16) out.push(chars[b % chars.length]); // 248 = 8 × 31: no bias
+    }
+  }
+  return out.join('').match(/.{4}/g).join('-');
+}
+
+const DIALOG_TITLES = { add: 'Add a login', reset: 'New password', remove: 'Remove login', own: 'Change my password' };
+const DIALOG_BUTTONS = { add: 'Add login', reset: 'Set password', remove: 'Remove login', own: 'Change password' };
+
+const LoginsCard = {
+  components: { Modal },
+  props: { team: Array }, // Settings → Your team, to suggest names and emails
+  data() {
+    return { users: [], me: null, owner: false, loading: true, error: null, dialog: null };
+  },
+  computed: {
+    dialogTitle() {
+      return this.dialog ? DIALOG_TITLES[this.dialog.kind] : '';
+    },
+    submitLabel() {
+      return this.dialog?.busy ? 'Saving…' : DIALOG_BUTTONS[this.dialog?.kind] || 'Save';
+    },
+  },
+  mounted() {
+    this.load();
+  },
+  methods: {
+    timeAgo,
+    async load() {
+      try {
+        const data = await api('GET', '/api/users');
+        Object.assign(this, { users: data.users, me: data.me, owner: data.owner, error: null });
+      } catch (err) {
+        this.error = `Could not load the logins: ${err.message}`;
+      } finally {
+        this.loading = false;
+      }
+    },
+    open(kind, user = null) {
+      this.dialog = { kind, user, name: '', email: '', current: '', password: '', ownerKey: '', shown: false, busy: false, error: '' };
+    },
+    // Picking a name from Your team fills in their email.
+    pickName() {
+      const m = (this.team || []).find((t) => t.name === this.dialog.name);
+      if (m?.email && !this.dialog.email) this.dialog.email = m.email;
+    },
+    makeUp() {
+      this.dialog.password = makePassword();
+      this.dialog.shown = true;
+    },
+    async submit() {
+      const d = this.dialog;
+      d.busy = true;
+      d.error = '';
+      const ownerKey = this.owner ? undefined : d.ownerKey;
+      try {
+        if (d.kind === 'add') {
+          const { user } = await api('POST', '/api/users', { name: d.name, email: d.email, password: d.password, ownerKey });
+          toast(`${user.name} can now sign in with ${user.email}. Give them their password in person.`);
+        } else if (d.kind === 'reset') {
+          await api('PUT', `/api/users/${encodeURIComponent(d.user.id)}`, { password: d.password, ownerKey });
+          toast(`New password set for ${d.user.name}. They’re signed out until they use it.`);
+        } else if (d.kind === 'remove') {
+          await api('DELETE', `/api/users/${encodeURIComponent(d.user.id)}`, { ownerKey });
+          toast(`${d.user.name}’s login is removed and they’re signed out.`);
+        } else if (d.kind === 'own') {
+          await api('POST', '/api/me/password', { current: d.current, next: d.password });
+          toast('Password changed. Anywhere else you were signed in with the old one is signed out.');
+        }
+        this.dialog = null;
+        this.load();
+      } catch (err) {
+        d.error = err.message;
+      } finally {
+        d.busy = false;
+      }
+    },
+  },
+  template: `
+  <section class="card logins">
+    <h2 class="card-title">Logins</h2>
+    <p class="muted sm">Everyone signs in with their own email and password. Adding someone, giving them a new password or removing them needs the owner key (<code>TEAM_PASSWORD</code> in Vercel){{ owner ? ', which you’re signed in with' : '' }}. Use the same name as in Your team so their details show on proposals they prepare.</p>
+    <div class="empty loading" v-if="loading">Loading…</div>
+    <p class="error-text sm" v-else-if="error">{{ error }}</p>
+    <template v-else>
+      <p class="muted sm" v-if="!users.length"><b>No one has their own login yet</b>, so everyone signs in with the owner key.</p>
+      <div class="login-row" v-for="u in users" :key="u.id">
+        <div class="lr-who"><b>{{ u.name }}<span class="you-tag" v-if="u.id === me">you</span></b><span>{{ u.email }}</span></div>
+        <span class="lr-last">{{ u.lastSignIn ? 'Signed in ' + timeAgo(u.lastSignIn) : 'Not signed in yet' }}</span>
+        <div class="lr-actions">
+          <button class="link sm" @click="open('reset', u)">New password</button>
+          <button class="link sm error-text" @click="open('remove', u)">Remove</button>
+        </div>
+      </div>
+    </template>
+    <div class="logins-actions">
+      <button class="btn" @click="open('add')">+ Add login</button>
+      <button class="btn ghost" v-if="me" @click="open('own')">Change my password</button>
+    </div>
+
+    <!-- Out to the page: cards animate in, which would trap a window inside the card. -->
+    <Teleport to="body"><Transition name="modal"><Modal v-if="dialog" :title="dialogTitle" @close="dialog = null">
+      <form class="form-grid" id="login-form" @submit.prevent="submit" autocomplete="off">
+        <template v-if="dialog.kind === 'add'">
+          <label>Name<input v-model="dialog.name" list="login-team" required maxlength="80" @change="pickName"></label>
+          <datalist id="login-team"><option v-for="m in team" :key="m.name" :value="m.name"></option></datalist>
+          <label>Email<input type="email" v-model="dialog.email" required autocomplete="off"></label>
+        </template>
+        <p class="span-2 dialog-text" v-if="dialog.kind === 'remove'">Remove <b>{{ dialog.user.name }}</b>’s login ({{ dialog.user.email }})? They’re signed out straight away. Their quotes stay as they are.</p>
+        <p class="span-2 dialog-text muted" v-if="dialog.kind === 'reset'">A new password for <b>{{ dialog.user.name }}</b>. They’re signed out everywhere until they sign in with it.</p>
+        <label class="span-2" v-if="dialog.kind === 'own'">Current password<input type="password" v-model="dialog.current" required autocomplete="current-password"></label>
+        <label class="span-2" v-if="dialog.kind !== 'remove'">{{ dialog.kind === 'own' ? 'New password' : 'Password' }}
+          <span class="pw-row">
+            <input :type="dialog.shown ? 'text' : 'password'" v-model="dialog.password" required minlength="10" maxlength="200" autocomplete="new-password">
+            <button type="button" class="btn sm" @click="makeUp">Make one up</button>
+          </span>
+          <small>At least 10 characters.<template v-if="dialog.kind !== 'own'"> Give it to them in person, not by email or text.</template></small>
+        </label>
+        <label class="span-2" v-if="!owner && dialog.kind !== 'own'">Owner key<input type="password" v-model="dialog.ownerKey" required autocomplete="off"><small><code>TEAM_PASSWORD</code> in Vercel. Needed to add, change or remove logins.</small></label>
+        <p class="span-2 error-text sm" v-if="dialog.error">{{ dialog.error }}</p>
+      </form>
+      <template #footer>
+        <button class="btn" @click="dialog = null">Cancel</button>
+        <button class="btn" :class="dialog.kind === 'remove' ? 'danger-fill' : 'primary'" type="submit" form="login-form" :disabled="dialog.busy">{{ submitLabel }}</button>
+      </template>
+    </Modal></Transition></Teleport>
+  </section>`,
+};
+
 // ---- Settings page --------------------------------------------------------------
 
 const SettingsPage = {
-  components: { MoneyInput, AutoTextarea, Modal },
+  components: { MoneyInput, AutoTextarea, Modal, LoginsCard },
   data() {
     return { s: clone(state.settings), saving: false, dirty: false, restart: null };
   },
@@ -3599,6 +3757,8 @@ const SettingsPage = {
       </div>
       <button class="btn" @click="addMember">+ Add person</button>
     </section>
+
+    <LoginsCard v-if="session && session.authEnabled" :team="s.team" />
 
     <section class="card">
       <h2 class="card-title">Labour types and default hourly rates</h2>
@@ -4048,8 +4208,125 @@ const tabInk = {
 
 // ---- App shell ---------------------------------------------------------------------
 
+// ---- Client pop-ups -------------------------------------------------------------
+// While the app's open it asks every 45 seconds (every 3 minutes in the
+// background) whether a client has opened or replied to a proposal, and pops up
+// a note. Only things that happen after the app opened pop up: the quotes list
+// already shows older ones. While the app's in the background, the tab or
+// window title counts them, e.g. "(2) Mesh Quotes".
+const clientEvents = reactive({ popups: [], tick: 0, latest: [] });
+const BASE_TITLE = document.title;
+const POPUP_LIFE = { view: 12000 }; // replies stay until closed
+let seenEvents = null; // event ids, once the first check is done
+let eventsTimer = null;
+let eventsOn = false;
+let unseenAway = 0;
+
+const isVisible = () => document.visibilityState === 'visible';
+
+function eventText(e) {
+  const quote = e.number || 'A quote';
+  const who = e.name || 'The client';
+  if (e.kind === 'accept') return `${quote} accepted by ${who}`;
+  if (e.kind === 'changes') return `${who} asked for changes to ${quote}`;
+  if (e.kind === 'decline') return `${quote} declined by ${who}`;
+  return `${quote} opened${e.device ? ` on a ${e.device}` : ''}`;
+}
+
+function startPopupTimer(p) {
+  if (p.timer || !POPUP_LIFE[p.kind] || !isVisible()) return;
+  p.timer = setTimeout(() => closePopup(p.id), POPUP_LIFE[p.kind]);
+}
+
+function closePopup(id) {
+  const i = clientEvents.popups.findIndex((p) => p.id === id);
+  if (i >= 0) {
+    clearTimeout(clientEvents.popups[i].timer);
+    clientEvents.popups.splice(i, 1);
+  }
+}
+
+function showPopup(e) {
+  const p = { id: e.id, kind: e.kind, quoteId: e.quoteId, at: e.at, text: eventText(e), sub: [e.title, e.client].filter(Boolean).join(' · '), timer: null };
+  clientEvents.popups.push(p);
+  // Keep a handful: the oldest view notes go first, then the oldest replies.
+  while (clientEvents.popups.length > 4) {
+    const old = clientEvents.popups.find((x) => x.kind === 'view') || clientEvents.popups[0];
+    closePopup(old.id);
+  }
+  startPopupTimer(clientEvents.popups.find((x) => x.id === p.id));
+}
+
+async function checkEvents() {
+  clearTimeout(eventsTimer);
+  try {
+    // Not through api(): a background check shouldn't send anyone to sign in.
+    const res = await fetch('/api/events', { cache: 'no-store' });
+    if (res.status === 401) {
+      eventsOn = false;
+      return;
+    }
+    if (res.ok) {
+      const { events = [] } = await res.json();
+      if (seenEvents) {
+        const fresh = events.filter((e) => !seenEvents.has(e.id)).reverse(); // oldest first
+        fresh.forEach(showPopup);
+        if (fresh.length) {
+          clientEvents.latest = fresh;
+          clientEvents.tick += 1;
+          if (!isVisible()) unseenAway += fresh.length;
+        }
+      }
+      seenEvents = new Set([...(seenEvents || []), ...events.map((e) => e.id)]);
+      document.title = unseenAway ? `(${unseenAway}) ${BASE_TITLE}` : BASE_TITLE;
+    }
+  } catch {
+    /* offline for a moment: try again next time */
+  }
+  if (eventsOn) eventsTimer = setTimeout(checkEvents, isVisible() ? 45000 : 180000);
+}
+
+function startClientEvents() {
+  if (eventsOn) return;
+  eventsOn = true;
+  checkEvents();
+  document.addEventListener('visibilitychange', () => {
+    if (!eventsOn || !isVisible()) return;
+    unseenAway = 0;
+    document.title = BASE_TITLE;
+    clientEvents.popups.forEach(startPopupTimer);
+    checkEvents();
+  });
+}
+
+const ClientPopups = {
+  computed: {
+    popups: () => clientEvents.popups,
+  },
+  methods: {
+    timeAgo,
+    close: closePopup,
+    open(p) {
+      closePopup(p.id);
+      location.hash = `#/quote/${p.quoteId}`;
+    },
+  },
+  template: `
+  <TransitionGroup tag="div" class="client-popups" name="popup" aria-live="polite">
+    <div v-for="p in popups" :key="p.id" class="client-popup" :class="p.kind" role="status">
+      <span class="cp-mark"></span>
+      <div class="cp-body">
+        <b>{{ p.text }}</b>
+        <span class="cp-sub">{{ p.sub ? p.sub + ' · ' : '' }}{{ timeAgo(p.at) }}</span>
+        <button class="link sm" @click="open(p)">Open quote</button>
+      </div>
+      <button class="icon-btn sm" @click="close(p.id)" aria-label="Close">✕</button>
+    </div>
+  </TransitionGroup>`,
+};
+
 const App = {
-  components: { QuotesList, QuoteEditor, ProductsPage, SettingsPage, DevPage, LightSwitch },
+  components: { QuotesList, QuoteEditor, ProductsPage, SettingsPage, DevPage, LightSwitch, ClientPopups },
   computed: {
     route: () => state.route,
     devOn: () => devOptions.on,
@@ -4087,11 +4364,16 @@ const App = {
       return;
     }
     if (!state.session.signedIn) return goToSignIn();
+    // Signed in with your own login: the app knows who you are ("Prepared by",
+    // who saved each version). Not remembered in "You are", which is for the
+    // owner key on a shared computer.
+    if (state.session.user) state.me = state.session.user.name;
     try {
       state.settings = await api('GET', '/api/settings');
     } catch (err) {
       if (err.status !== 401) toast(`Could not load settings: ${err.message}`, 'error');
     }
+    startClientEvents();
   },
   methods: { signOut },
   template: `
@@ -4104,7 +4386,8 @@ const App = {
       <a v-if="devOn" href="#/dev" class="dev-link" title="Developer options" :class="{ active: route.name === 'dev' }">Dev</a>
     </nav>
     <div class="header-right">
-      <label class="me" v-if="team.length">
+      <span class="me signed-in-as" v-if="session && session.user" :title="'Signed in as ' + session.user.email">{{ session.user.name }}</span>
+      <label class="me" v-else-if="team.length">
         <span>You are</span>
         <select v-model="me"><option value="">—</option><option v-for="n in team" :value="n">{{ n }}</option></select>
       </label>
@@ -4129,7 +4412,8 @@ const App = {
   </main>
   <TransitionGroup tag="div" class="toasts" name="toast" aria-live="polite">
     <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type" :style="{ '--life': t.life + 'ms' }">{{ t.msg }}</div>
-  </TransitionGroup>`,
+  </TransitionGroup>
+  <ClientPopups v-if="ready" />`,
 };
 
 const app = createApp(App);

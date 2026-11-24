@@ -50,6 +50,10 @@
     .signin input { min-height: 46px; }
     .signin .btn { width: 100%; margin-top: 18px; }
     .signin .error { color: var(--red); font-size: 13px; margin-top: 12px; min-height: 1.2em; }
+    .signin label + label { margin-top: 14px; }
+    .signin label[hidden] { display: none; }
+    .signin .switch-mode { display: block; margin: 14px auto 0; }
+    .signin .switch-mode[hidden] { display: none; }
   </style>
 </head>
 <body>
@@ -63,9 +67,11 @@
     <form class="card" id="form">
       <p class="eyebrow">Mesh Quotes</p>
       <h1>Sign in</h1>
-      <p class="muted sm">Enter the team password to open Mesh Quotes.</p>
-      <label>Password<input type="password" id="password" autocomplete="current-password" required autofocus></label>
+      <p class="muted sm" id="intro">Sign in with your email and password.</p>
+      <label id="email-field">Email<input type="email" id="email" autocomplete="username" autofocus></label>
+      <label><span id="password-label">Password</span><input type="password" id="password" autocomplete="current-password" required></label>
       <button class="btn primary lg" type="submit" id="submit">Sign in</button>
+      <button class="link sm switch-mode" type="button" id="switch-mode" hidden>Use the owner key instead</button>
       <div class="error" id="error" role="alert"></div>
     </form>
   </main>
@@ -116,9 +122,42 @@
     // Where to go afterwards, e.g. /#/quote/abc
     const next = location.hash.length > 1 ? location.hash : '#/';
 
+    // Two ways in: your own login (email and password), or the owner key
+    // (TEAM_PASSWORD in Vercel), which is the only way in until someone has a login.
+    const emailField = document.getElementById('email-field');
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const switchMode = document.getElementById('switch-mode');
+    let ownerMode = false;
+    let hasLogins = true;
+
+    function showMode() {
+      emailField.hidden = ownerMode;
+      emailInput.required = !ownerMode;
+      document.getElementById('password-label').textContent = ownerMode ? 'Owner key' : 'Password';
+      passwordInput.autocomplete = ownerMode ? 'off' : 'current-password';
+      document.getElementById('intro').textContent = !hasLogins
+        ? 'No one has their own login yet. Enter the owner key (TEAM_PASSWORD in Vercel), then add people in Settings → Team.'
+        : ownerMode
+          ? 'Enter the owner key (TEAM_PASSWORD in Vercel).'
+          : 'Sign in with your email and password.';
+      switchMode.hidden = !hasLogins;
+      switchMode.textContent = ownerMode ? 'Use your own login instead' : 'Use the owner key instead';
+      error.textContent = '';
+    }
+    switchMode.addEventListener('click', () => {
+      ownerMode = !ownerMode;
+      showMode();
+      (ownerMode ? passwordInput : emailInput).focus();
+    });
+
     fetch('/api/session').then((r) => r.json()).then((s) => {
-      if (s.signedIn) location.replace('/' + next);
-      else if (s.setupMessage && s.setup === 'password') error.textContent = s.setupMessage;
+      if (s.signedIn) return location.replace('/' + next);
+      hasLogins = Boolean(s.hasLogins);
+      ownerMode = !hasLogins;
+      showMode();
+      (ownerMode ? passwordInput : emailInput).focus();
+      if (s.setupMessage && s.setup === 'password') error.textContent = s.setupMessage;
     }).catch(() => {});
 
     form.addEventListener('submit', async (e) => {
@@ -127,10 +166,12 @@
       submit.disabled = true;
       submit.textContent = 'Signing in…';
       try {
+        const body = { password: passwordInput.value };
+        if (!ownerMode) body.email = emailInput.value.trim();
         const res = await fetch('/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: document.getElementById('password').value }),
+          body: JSON.stringify(body),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Could not sign in');

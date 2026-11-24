@@ -23,13 +23,21 @@ You'll need a free [Vercel](https://vercel.com) account. It takes about 10 minut
    **Storage → Create Database** (or *Browse Marketplace*), pick
    **Upstash → Upstash for Redis**, the free plan and a London/Europe region, and
    connect it to the project. Vercel adds the connection settings for you.
-3. **Set the team password.** Go to **Settings → Environment Variables** and add
-   `TEAM_PASSWORD` with a long password the team will share.
+3. **Set the owner key.** Go to **Settings → Environment Variables** and add
+   `TEAM_PASSWORD` with a long password (Production only, **Sensitive** on). It's
+   the owner key: it gets you in before anyone has their own login, and it's
+   what adds and removes logins, so keep it to whoever runs the business.
 4. **Redeploy.** Go to **Deployments**, open the ⋯ menu on the latest one and
    click **Redeploy**, so the new settings kick in.
-5. **Open the site** (e.g. `https://meshsystemsquotes.vercel.app`), sign in, then
-   go to **Settings** and put in your names and the company details. The Ubiquiti
-   catalogue loads the first time you open the product picker (about 10 seconds).
+5. **Open the site** (e.g. `https://meshsystemsquotes.vercel.app`), sign in with
+   the owner key, then go to **Settings** and put in your names and the company
+   details. The Ubiquiti catalogue loads the first time you open the product
+   picker (about 10 seconds).
+6. **Give everyone their own login.** In **Settings → Logins**, click **Add
+   login** for each person (use the same name as in **Your team**, so their
+   details show on proposals they prepare). **Make one up** makes a strong
+   password; give it to them in person. From then on they sign in with their
+   email and password.
 
 ### Connecting Habitech
 
@@ -64,6 +72,17 @@ Copying the link marks the quote as **Sent**. From the link, the client can
 the quote and in the quotes list. The **History** tab shows when they opened it
 (our own views don't count, and neither do link previews in WhatsApp, email and
 so on).
+
+While you've got the app open, it pops up a note in the bottom right when a
+client opens a proposal (“MESH-0012 opened on a phone”) or replies to it
+(“MESH-0012 accepted by Sam Jones”), with an **Open quote** button. It checks
+every 45 seconds, so a note can take up to a minute to show. The “opened” ones
+go away by themselves after a few seconds; replies stay until you close them.
+If the app's in the background, the tab or window title counts them, like
+“(2) Mesh Quotes”, and the notes are waiting when you come back. A client
+refreshing the page within half an hour doesn't count as opening it again. Only
+things that happen while the app's open pop up; for anything older, look at the
+quotes list.
 
 ### What runs on Vercel
 
@@ -132,7 +151,7 @@ install.
 - **Anything else:** run `npm start` in this folder, then open http://localhost:3000.
 
 On your own computer, the data's kept in the `data/` folder (it never goes up to
-GitHub), there's no password unless you set `TEAM_PASSWORD`, and **Download
+GitHub), there's no sign-in unless you set `TEAM_PASSWORD`, and **Download
 PDF** makes the PDF straight away using Edge or Chrome.
 
 Private stuff like the Habitech key goes in a file called `.env` in this folder
@@ -291,6 +310,18 @@ Private stuff like the Habitech key goes in a file called `.env` in this folder
 - **Two people at once** – if two of us edit the same quote at the same time,
   whoever saves second gets warned and can load the other person's changes or
   keep their own.
+- **Logins** – everyone signs in with their own email and password, and their
+  name shows top right. New quotes say they prepared them, and saved versions
+  show who made them. **Settings → Logins** lists everyone and when they last
+  signed in. Adding someone, giving them a new password or removing them needs
+  the owner key (`TEAM_PASSWORD` in Vercel), typed in each time unless you
+  signed in with it. Removing someone or giving them a new password signs them
+  out straight away (within half a minute on other servers). Anyone can change
+  their own password with **Change my password**. Passwords are only ever saved
+  scrambled (scrypt, with a different salt for each person), so nobody can read
+  them, not even from the database. Wrong guesses count towards the same
+  15-minute lockout as signing in. The owner key still works on the sign-in page
+  (**Use the owner key instead**) if someone gets locked out.
 - **Look** – styled like the Mesh website, with a light and a dark mode (the
   light switch, top right). Animations turn off on devices set to reduce motion.
 
@@ -367,6 +398,7 @@ Every release has a tag on GitHub (the repo's **Tags** list):
 | `v4.8` | Developer options: a **Dev** page you open by searching a secret word on the Habitech tab (system info, connection tests, run jobs, backup download, reset this computer). Going back to `v4.7` removes it; nothing else changes |
 | `v4.9` | **Team notes** on the right of every quote (moved from the bottom of Pricing & terms; never on the proposal, and editing them doesn't change the revision number any more), the right-hand column scrolls on its own when it's taller than the window, and the proposal preview has no “Back to editor” button. Going back to `v4.8` puts the notes box back under Pricing & terms (the notes are kept) and brings the button back |
 | `v5` | **Low-margin warning** (lines below cost or under the margin in Settings get flagged, and Copy client link asks you to check them first) and **Cheaper supplier** (lines show when another supplier has the same part for less, with a Switch button that keeps the client's price). The README's rewritten too. Going back to `v4.9` removes both; lines you've already switched stay with their new supplier |
+| `v5.1` | **Logins** (everyone signs in with their own email and password; `TEAM_PASSWORD` becomes the owner key that adds and removes them) and **client pop-ups** (a note when a client opens or replies to a proposal while the app's open). Going back to `v5` means everyone signs in with the owner key again (the logins are kept for when you come forward) and the pop-ups stop |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the
   deployment of the older version and click **⋯** → **Instant Rollback** (or
@@ -404,7 +436,8 @@ status until you pick one.
   gives its own product code, which is usually the maker's, but that hasn't
   been checked against real NetXL data yet (it needs the NetXL key). If two
   suppliers write a code differently it won't spot them.
-- One shared team password, no separate accounts.
+- Logins aren't in the Dev page backup (on purpose: it never holds passwords),
+  so after moving to a new database, add everyone again.
 - Quotes made on your own computer stay there; the online version starts empty.
 - The default labour rates and terms are just placeholders, so set your own in
   Settings.
