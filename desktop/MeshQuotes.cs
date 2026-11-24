@@ -24,14 +24,15 @@ using Microsoft.Web.WebView2.WinForms;
 [assembly: AssemblyProduct("Mesh Quotes")]
 [assembly: AssemblyCompany("Mesh Smart Home Technology")]
 [assembly: AssemblyCopyright("Mesh Smart Home Technology")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 namespace MeshQuotes
 {
     static class Program
     {
-        const string LiveSite = "https://meshsystemsquotes.vercel.app/";
+        // 1.1: the new Vercel project (meshsystemsuk). 1.0 opened meshsystemsquotes.vercel.app.
+        const string LiveSite = "https://meshquotes.vercel.app/";
 
         // The WebView2 parts packed inside this .exe by build.ps1.
         static readonly string[] Parts = { "Microsoft.Web.WebView2.Core.dll", "Microsoft.Web.WebView2.WinForms.dll", "WebView2Loader.dll" };

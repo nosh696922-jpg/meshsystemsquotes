@@ -29,7 +29,7 @@ You'll need a free [Vercel](https://vercel.com) account. It takes about 10 minut
    what adds and removes logins, so keep it to whoever runs the business.
 4. **Redeploy.** Go to **Deployments**, open the ⋯ menu on the latest one and
    click **Redeploy**, so the new settings kick in.
-5. **Open the site** (e.g. `https://meshsystemsquotes.vercel.app`), sign in with
+5. **Open the site** (ours is `https://meshquotes.vercel.app`), sign in with
    the owner key, then go to **Settings** and put in your names and the company
    details. The Ubiquiti catalogue loads the first time you open the product
    picker (about 10 seconds).
@@ -114,9 +114,11 @@ Windows Settings → Apps.
 There's a proper Windows program too: **Settings → Use it like a program →
 download the Windows program**, or `/download/MeshQuotes.exe` on the site. It's
 about 1 MB and there's nothing to install (save it anywhere and double-click
-it). It opens the live site in its own window with a dark title bar and the
-Mesh icon. Like the installed app, it's always the latest version with the same
-quotes. Right-click its taskbar icon to pin it.
+it). It opens the live site (`https://meshquotes.vercel.app`) in its own window
+with a dark title bar and the Mesh icon. Like the installed app, it's always the
+latest version with the same quotes. Right-click its taskbar icon to pin it.
+Copies downloaded before version 1.1 open the old address
+(meshsystemsquotes.vercel.app), so download it again.
 
 - It uses Microsoft Edge WebView2, which comes with Windows 10 and 11. If a PC
   hasn't got it, the program offers Microsoft's free download.
@@ -399,6 +401,7 @@ Every release has a tag on GitHub (the repo's **Tags** list):
 | `v4.9` | **Team notes** on the right of every quote (moved from the bottom of Pricing & terms; never on the proposal, and editing them doesn't change the revision number any more), the right-hand column scrolls on its own when it's taller than the window, and the proposal preview has no “Back to editor” button. Going back to `v4.8` puts the notes box back under Pricing & terms (the notes are kept) and brings the button back |
 | `v5` | **Low-margin warning** (lines below cost or under the margin in Settings get flagged, and Copy client link asks you to check them first) and **Cheaper supplier** (lines show when another supplier has the same part for less, with a Switch button that keeps the client's price). The README's rewritten too. Going back to `v4.9` removes both; lines you've already switched stay with their new supplier |
 | `v5.1` | **Logins** (everyone signs in with their own email and password; `TEAM_PASSWORD` becomes the owner key that adds and removes them) and **client pop-ups** (a note when a client opens or replies to a proposal while the app's open). Going back to `v5` means everyone signs in with the owner key again (the logins are kept for when you come forward) and the pop-ups stop |
+| `v5.2` | The site can't be shown inside another website's frame (stops lookalike pages tricking people into signing in), and the Windows program (version 1.1) opens the new address, `meshquotes.vercel.app`. Going back to `v5.1` allows framing again and puts back the program that opens the old address |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the
   deployment of the older version and click **⋯** → **Instant Rollback** (or
