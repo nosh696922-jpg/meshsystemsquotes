@@ -66,10 +66,13 @@ but treat them like a private document and only send them to the client.
 Online, **Save as PDF** opens the print window; just pick *Save as PDF* as the
 printer.
 
-Copying the link marks the quote as **Sent**. From the link, the client can
-**accept** (name, optional PO number, tick to agree), **request changes** or
-**decline**. Whatever they pick sets the quote's status and shows at the top of
-the quote and in the quotes list. The **History** tab shows when they opened it
+Copying the link marks the quote as **Sent**. Online replies are off for now,
+so the link just shows the proposal. Tick **Online accept buttons** under
+**Pricing & terms → What the proposal shows** (or in Settings for all new
+quotes) and the client can **accept** (name, optional PO number, tick to
+agree), **request changes** or **decline** from the link. Whatever they pick
+sets the quote's status and shows at the top of the quote and in the quotes
+list. The **History** tab shows when they opened it
 (our own views don't count, and neither do link previews in WhatsApp, email and
 so on).
 
@@ -207,11 +210,13 @@ Private stuff like the Habitech key goes in a file called `.env` in this folder
   **Hide out of stock** (sold out at Ubiquiti or Sonos, out of stock at
   Habitech). Each switch shows how many products it's hiding, and each computer
   remembers what you picked.
-- **Your own tab order** – drag the catalogue tabs (Ubiquiti, Sonos, NetXL…)
+- **Your own tabs** – drag the catalogue tabs (Ubiquiti, Sonos, NetXL…)
   along the bar in **Add product** or on the Products page, or use **More** (or
-  **⋯**) → **Arrange tabs**, which works on phones too. Tabs that don't fit go
-  under **More**. Each computer remembers its own order (the same on both
-  screens) and opens on the first tab. **Reset to the usual order** puts it back.
+  **⋯**) → **Arrange or hide tabs**, which works on phones too. Untick a tab
+  there to hide it (tick it again to bring it back); there's always at least
+  one left. Tabs that don't fit go under **More**. Each computer remembers its
+  own order and hidden tabs (the same on both screens) and opens on the first
+  tab that's showing. **Show all, usual order** puts it all back.
 - **Our own product names** – give a catalogue product the name clients should
   see, like the Ubiquiti UCG-Max as “Home network router”. Rename a line on a
   quote and click **Always use this name for this product**, or use **Rename**
@@ -286,12 +291,17 @@ Private stuff like the Habitech key goes in a file called `.env` in this folder
   whole-quote discount (e.g. “Package saving”) if there is one.
 - **Page 2** – the title, then date, valid until and who prepared it (their
   name as it's written on the quote, so use the full name, e.g. “Tim
-  Marsden”), then who it's for, the introduction and the scope. On paper,
-  **Equipment & services** always starts on a new page.
+  Marsden”), then who it's for, the introduction and the scope.
+- **Page breaks** – under **Pricing & terms → What the proposal shows**, tick
+  where printed proposals and PDFs start a new page: before **Equipment &
+  services** (ticked as usual), before **each area** after the first, and
+  before the **Investment summary**. Fewer ticks means fewer pages. Settings
+  has the same ticks for new quotes. They don't change the online link, which
+  is one long page.
 - **Signature boxes** – off unless you tick them under **Pricing & terms → What
   the proposal shows** (or in Settings for all new quotes). When they're on,
   printed proposals and PDFs end with an Acceptance section (name, signature,
-  date, PO) for signing on paper. Clients can accept online either way.
+  date, PO) for signing on paper.
 - **Front cover** – new proposals start with our cover page (the house at
   night), then the title and dates at the top of page 2. To get a small quote
   onto fewer pages, untick **Front cover** under **Pricing & terms → What the
@@ -407,6 +417,7 @@ Every release has a tag on GitHub (the repo's **Tags** list):
 | `v5.1` | **Logins** (everyone signs in with their own email and password; `TEAM_PASSWORD` becomes the owner key that adds and removes them) and **client pop-ups** (a note when a client opens or replies to a proposal while the app's open). Going back to `v5` means everyone signs in with the owner key again (the logins are kept for when you come forward) and the pop-ups stop |
 | `v5.2` | The site can't be shown inside another website's frame (stops lookalike pages tricking people into signing in), and the Windows program (version 1.1) opens the new address, `meshquotes.vercel.app`. Going back to `v5.1` allows framing again and puts back the program that opens the old address |
 | `v5.3` | Proposal tidy-up from the marked-up MESH-0002: the front cover is just the picture (no Client / Project / Date / Revision boxes), page 2 loses the Investment figure and the second “Prepared by” box, Equipment & services starts on a new page, and the signature boxes are off unless ticked. Going back to `v5.2` brings all of those back |
+| `v5.4` | No online accept for now: the client link has no Accept / Request changes / Decline buttons (and the server turns replies away) unless **Online accept buttons** is ticked on the quote. Also, catalogue tabs can be hidden (**⋯** or **More** → **Arrange or hide tabs**, untick a tab), and page-break ticks (new page before Equipment & services, each area, the Investment summary). Going back to `v5.3` brings the buttons back on every proposal, shows every tab again (the hidden list is kept, just ignored) and puts Equipment & services back to always starting a new page |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the
   deployment of the older version and click **⋯** → **Instant Rollback** (or

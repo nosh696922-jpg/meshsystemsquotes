@@ -482,7 +482,11 @@ label.check input { margin-top: 3px; }
 .tm-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
 .tm-list li { display: flex; align-items: center; gap: 6px; padding: 5px 2px; border-top: 1px solid var(--line-soft); }
 .tm-list li:first-child { border-top: none; }
-.tm-name { flex: 1; min-width: 0; font-size: 13.5px; color: var(--text); }
+.tm-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text); cursor: pointer; }
+.tm-name input { margin: 0; flex: none; accent-color: var(--blue); cursor: pointer; }
+.tm-name input:disabled { cursor: not-allowed; }
+.tm-list li.off .tm-name { color: var(--muted); }
+.tm-list li.off .tm-name span { text-decoration: line-through; }
 .tm-move { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 13px; cursor: pointer; }
 .tm-move:hover:not(:disabled) { border-color: var(--blue); color: var(--blue-text); }
 .tm-move:disabled { opacity: 0.35; cursor: default; }
@@ -705,6 +709,8 @@ table.rates th small { text-transform: none; letter-spacing: 0; font-weight: 400
 .choice small { display: block; color: var(--muted); }
 .checks.dim { opacity: 0.55; }
 .cover-option { margin-top: 12px; }
+.page-breaks { margin-top: 16px; }
+.pb-title { font-size: 14px; color: var(--text); margin-bottom: 8px; }
 .inline-select { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 14px; color: var(--text); }
 .inline-select select { width: auto; max-width: 100%; }
 

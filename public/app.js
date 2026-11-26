@@ -622,39 +622,55 @@ async function isDevWord(text) {
 
 // What "Reset this computer" clears: its saved view choices. Not the light/dark
 // choice, who you are, or developer options.
-const RESET_KEYS = ['mesh.productSort', 'mesh.hideGraded', 'mesh.hideOutOfStock', 'mesh.tabOrder', 'mesh.hideProfit'];
+const RESET_KEYS = ['mesh.productSort', 'mesh.hideGraded', 'mesh.hideOutOfStock', 'mesh.tabOrder', 'mesh.hiddenTabs', 'mesh.hideProfit'];
 
 // ---- Catalogue tab bar (Add product and the Products page) ---------------------
-// Drag a tab to move it; tabs that don't fit go under "More". Each computer
-// remembers its own order (like the sort and hide switches), the same on both screens.
+// Drag a tab to move it; tabs that don't fit go under "More". Tabs can be hidden
+// under "Arrange or hide tabs". Each computer remembers its own order and hidden
+// tabs (like the sort and hide switches), the same on both screens.
 
 const TAB_ORDER_KEY = 'mesh.tabOrder';
-function readTabOrder() {
+const HIDDEN_TABS_KEY = 'mesh.hiddenTabs';
+function readIdList(key) {
   try {
-    const ids = JSON.parse(storageGet(TAB_ORDER_KEY) || '[]');
+    const ids = JSON.parse(storageGet(key) || '[]');
     return Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : [];
   } catch {
     return [];
   }
 }
-const tabOrder = reactive({ ids: readTabOrder() });
-function saveTabOrder(ids) {
-  tabOrder.ids = ids;
+function saveIdList(key, ids) {
   try {
-    if (ids.length) localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(ids));
-    else localStorage.removeItem(TAB_ORDER_KEY);
+    if (ids.length) localStorage.setItem(key, JSON.stringify(ids));
+    else localStorage.removeItem(key);
   } catch {
     /* private mode etc. */
   }
 }
+const tabOrder = reactive({ ids: readIdList(TAB_ORDER_KEY) });
+function saveTabOrder(ids) {
+  tabOrder.ids = ids;
+  saveIdList(TAB_ORDER_KEY, ids);
+}
+// Tabs this computer has hidden. They're left out of the bar on both screens,
+// except while one of them is the tab that's open.
+const hiddenTabs = reactive({ ids: readIdList(HIDDEN_TABS_KEY) });
+function saveHiddenTabs(ids) {
+  hiddenTabs.ids = ids;
+  saveIdList(HIDDEN_TABS_KEY, ids);
+}
+const isHiddenTab = (id) => hiddenTabs.ids.includes(id);
 // Tabs in this computer's order. Tabs it hasn't placed yet (a new catalogue) go last.
 function orderedTabs(tabs) {
   const pos = new Map(tabOrder.ids.map((id, i) => [id, i]));
   const placed = tabs.filter((t) => pos.has(t.id)).sort((a, b) => pos.get(a.id) - pos.get(b.id));
   return [...placed, ...tabs.filter((t) => !pos.has(t.id))];
 }
-// The tab a screen opens on: the first in this computer's order.
-const firstTab = (ids) => orderedTabs(ids.map((id) => ({ id })))[0]?.id;
+// The tab a screen opens on: the first in this computer's order that isn't hidden.
+function firstTab(ids) {
+  const all = orderedTabs(ids.map((id) => ({ id })));
+  return (all.find((t) => !isHiddenTab(t.id)) || all[0])?.id;
+}
 
 const TabBar = {
   props: {
@@ -664,8 +680,16 @@ const TabBar = {
   emits: ['update:modelValue'],
   data: () => ({ fit: Infinity, menu: false, arranging: false, menuLeft: 0, dragId: null, dropAt: null }),
   computed: {
-    ordered() {
+    // Every tab in this computer's order, hidden ones too (for Arrange or hide tabs).
+    all() {
       return orderedTabs(this.tabs);
+    },
+    // The tabs on the bar: not the hidden ones, unless it's the open tab.
+    ordered() {
+      return this.all.filter((t) => !isHiddenTab(t.id) || t.id === this.modelValue);
+    },
+    showingCount() {
+      return this.all.filter((t) => !isHiddenTab(t.id)).length;
     },
     shown() {
       return this.ordered.slice(0, this.fit);
@@ -769,13 +793,25 @@ const TabBar = {
     save(ids) {
       saveTabOrder([...ids, ...tabOrder.ids.filter((id) => !ids.includes(id))]);
     },
+    // Moves among all the tabs, hidden ones included, so they keep their place.
     move(id, to) {
-      const ids = this.ordered.map((t) => t.id).filter((x) => x !== id);
+      const ids = this.all.map((t) => t.id).filter((x) => x !== id);
       ids.splice(Math.max(0, Math.min(ids.length, to)), 0, id);
       this.save(ids);
     },
+    isHidden: isHiddenTab,
+    // Hide or show a tab. There's always at least one left showing, and hiding
+    // the open tab moves to the first one that's still showing.
+    toggleHidden(t) {
+      if (isHiddenTab(t.id)) return saveHiddenTabs(hiddenTabs.ids.filter((id) => id !== t.id));
+      const left = this.all.filter((x) => x.id !== t.id && !isHiddenTab(x.id));
+      if (!left.length) return;
+      saveHiddenTabs([...hiddenTabs.ids, t.id]);
+      if (this.modelValue === t.id) this.$emit('update:modelValue', left[0].id);
+    },
     reset() {
       saveTabOrder([]);
+      saveHiddenTabs([]);
     },
     dragStart(e, id) {
       this.dragId = id;
@@ -802,7 +838,7 @@ const TabBar = {
       const after = this.dropAt === `${id}:after`;
       this.dragEnd();
       if (!dragId || dragId === id) return;
-      const ids = this.ordered.map((t) => t.id).filter((x) => x !== dragId);
+      const ids = this.all.map((t) => t.id).filter((x) => x !== dragId);
       ids.splice(ids.indexOf(id) + (after ? 1 : 0), 0, dragId);
       this.save(ids);
     },
@@ -817,7 +853,7 @@ const TabBar = {
       e.preventDefault();
       const dragId = this.dragId;
       this.dragEnd();
-      if (dragId) this.move(dragId, this.ordered.length - 1);
+      if (dragId) this.move(dragId, this.all.length - 1);
     },
     dragEnd() {
       this.dragId = null;
@@ -832,7 +868,7 @@ const TabBar = {
         @click="select(t.id)" @dragstart="dragStart($event, t.id)" @dragover="dragOver($event, t.id)" @dragleave="dragLeave(t.id)" @drop="drop($event, t.id)" @dragend="dragEnd">{{ t.label }}<span class="count" v-if="t.count != null">{{ t.count }}</span></button>
       <button v-if="hidden.length" ref="more" type="button" class="tab-more" :class="{ active: Boolean(activeHidden), open: menu, 'drop-before': dropAt === 'more' }"
         aria-haspopup="true" :aria-expanded="menu ? 'true' : 'false'" @click="toggleMenu" @dragover="dragOverMore" @dragleave="dropAt = null" @drop="dropOnMore">{{ activeHidden ? activeHidden.label : 'More' }}<span class="count" v-if="activeHidden && activeHidden.count != null">{{ activeHidden.count }}</span><span class="tab-caret" aria-hidden="true"></span></button>
-      <button v-else ref="more" type="button" class="tab-dots" title="Arrange tabs" aria-label="Arrange tabs" aria-haspopup="true" :aria-expanded="menu ? 'true' : 'false'" @click="toggleMenu">⋯</button>
+      <button v-else ref="more" type="button" class="tab-dots" title="Arrange or hide tabs" aria-label="Arrange or hide tabs" aria-haspopup="true" :aria-expanded="menu ? 'true' : 'false'" @click="toggleMenu">⋯</button>
     </nav>
     <Transition name="pop">
       <div v-if="menu" ref="menu" class="tab-menu" :class="{ arranging }" :style="{ left: menuLeft + 'px' }">
@@ -840,20 +876,23 @@ const TabBar = {
           <button v-for="t in hidden" :key="t.id" type="button" class="tm-item" :class="{ active: modelValue === t.id }" draggable="true"
             @click="select(t.id)" @dragstart="dragStart($event, t.id)" @dragend="dragEnd">{{ t.label }}<span class="count" v-if="t.count != null">{{ t.count }}</span></button>
           <div class="tm-sep" v-if="hidden.length"></div>
-          <button type="button" class="tm-item tm-arrange" @click="arrange">Arrange tabs…</button>
+          <button type="button" class="tm-item tm-arrange" @click="arrange">Arrange or hide tabs…</button>
         </template>
         <template v-else>
-          <div class="tm-title">Arrange tabs</div>
-          <p class="tm-hint">Use the arrows, or drag tabs along the bar. This computer remembers the order.</p>
+          <div class="tm-title">Arrange or hide tabs</div>
+          <p class="tm-hint">Untick a tab to hide it. Use the arrows, or drag tabs along the bar. This computer remembers your choices.</p>
           <ol class="tm-list">
-            <li v-for="(t, i) in ordered" :key="t.id">
-              <span class="tm-name">{{ t.label }}</span>
+            <li v-for="(t, i) in all" :key="t.id" :class="{ off: isHidden(t.id) }">
+              <label class="tm-name" :title="isHidden(t.id) ? 'Hidden: tick to show it' : 'Untick to hide it'">
+                <input type="checkbox" :checked="!isHidden(t.id)" :disabled="!isHidden(t.id) && showingCount === 1" @change="toggleHidden(t)">
+                <span>{{ t.label }}</span>
+              </label>
               <button type="button" class="tm-move" :disabled="i === 0" @click="move(t.id, i - 1)" :aria-label="'Move ' + t.label + ' earlier'">↑</button>
-              <button type="button" class="tm-move" :disabled="i === ordered.length - 1" @click="move(t.id, i + 1)" :aria-label="'Move ' + t.label + ' later'">↓</button>
+              <button type="button" class="tm-move" :disabled="i === all.length - 1" @click="move(t.id, i + 1)" :aria-label="'Move ' + t.label + ' later'">↓</button>
             </li>
           </ol>
           <div class="tm-foot">
-            <button type="button" class="link sm" @click="reset">Reset to the usual order</button>
+            <button type="button" class="link sm" @click="reset">Show all, usual order</button>
             <button type="button" class="btn sm" @click="closeMenu">Done</button>
           </div>
         </template>
@@ -2034,6 +2073,12 @@ const QuoteEditor = {
       quote.display ||= {};
       quote.display.layout ||= 'detailed';
       quote.display.labourPlacement ||= state.settings?.display?.labourPlacement || 'area';
+      // Ticks added after the quote was made follow Settings, so the boxes
+      // show what the proposal actually does.
+      const ticks = { onlineAccept: false, showSignature: false, breakEquipment: true, breakAreas: false, breakSummary: false };
+      for (const [key, usual] of Object.entries(ticks)) {
+        if (typeof quote.display[key] !== 'boolean') quote.display[key] = state.settings?.display?.[key] ?? usual;
+      }
       quote.client ||= {};
       quote.discount ||= { type: 'none', percent: null, amount: null, label: '' };
       quote.costDiscount ??= 0;
@@ -2861,7 +2906,16 @@ const QuoteEditor = {
               </select>
             </label>
             <label class="check cover-option"><input type="checkbox" v-model="frontCover"> Front cover <small class="muted">(the house picture; adds a page)</small></label>
-            <label class="check"><input type="checkbox" v-model="quote.display.showSignature"> Signature boxes <small class="muted">(name, signature, date and PO at the end, for signing on paper; clients can always accept online)</small></label>
+            <label class="check"><input type="checkbox" v-model="quote.display.onlineAccept"> Online accept buttons <small class="muted">(the client can accept, ask for changes or decline from the link)</small></label>
+            <label class="check"><input type="checkbox" v-model="quote.display.showSignature"> Signature boxes <small class="muted">(name, signature, date and PO at the end, for signing on paper)</small></label>
+            <div class="page-breaks">
+              <div class="pb-title">New page before <small class="muted">(on paper and in PDFs; fewer ticks, fewer pages)</small></div>
+              <div class="checks">
+                <label class="check"><input type="checkbox" v-model="quote.display.breakEquipment"> Equipment &amp; services</label>
+                <label class="check"><input type="checkbox" v-model="quote.display.breakAreas"> Each area <small class="muted">(after the first)</small></label>
+                <label class="check"><input type="checkbox" v-model="quote.display.breakSummary"> Investment summary</label>
+              </div>
+            </div>
           </section>
 
           <section class="card">
@@ -3818,7 +3872,16 @@ const SettingsPage = {
         <label class="check"><input type="checkbox" v-model="s.display.showSku"> Manufacturer and model numbers</label>
         <label class="check"><input type="checkbox" v-model="s.display.showLabourDetail"> Labour under each item</label>
         <label class="check"><input type="checkbox" v-model="s.display.frontCover"> Front cover (the house picture)</label>
+        <label class="check"><input type="checkbox" v-model="s.display.onlineAccept"> Online accept buttons</label>
         <label class="check"><input type="checkbox" v-model="s.display.showSignature"> Signature boxes (for signing on paper)</label>
+      </div>
+      <div class="page-breaks">
+        <div class="pb-title">New page before <small class="muted">(on paper and in PDFs)</small></div>
+        <div class="checks">
+          <label class="check"><input type="checkbox" v-model="s.display.breakEquipment"> Equipment &amp; services</label>
+          <label class="check"><input type="checkbox" v-model="s.display.breakAreas"> Each area <small class="muted">(after the first)</small></label>
+          <label class="check"><input type="checkbox" v-model="s.display.breakSummary"> Investment summary</label>
+        </div>
       </div>
       <label class="inline-select">Labour
         <select v-model="s.display.labourPlacement">
@@ -3889,7 +3952,7 @@ const DevPage = {
     catalogues() {
       return (this.info?.catalogues || []).filter((c) => !c.custom);
     },
-    resetLabels: () => ['Sort order', 'Hide graded stock', 'Hide out of stock', 'Tab order', 'Hidden profit panel'],
+    resetLabels: () => ['Sort order', 'Hide graded stock', 'Hide out of stock', 'Tab order', 'Hidden tabs', 'Hidden profit panel'],
   },
   mounted() {
     if (this.on) this.load();

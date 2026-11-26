@@ -349,8 +349,11 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   .toolbar, .reply-banner, .respond-ui, .cover-mesh { display: none; }
   .print-only { display: block; }
   .screen-only { display: none; }
-  /* Equipment & services starts on a page of its own. */
-  .block.equipment { break-before: page; }
+  /* New pages, as ticked on the quote (lib/proposal.js adds the classes). */
+  .pb-equipment .block.equipment { break-before: page; }
+  .pb-areas .area + .area { break-before: page; margin-top: 0; padding-top: 0; border-top: none; }
+  .pb-areas .area + .area::before { display: none; }
+  .pb-summary .investment-block { break-before: page; }
   .web-mode .doc { width: auto; max-width: none; margin: 0; box-shadow: none; border-radius: 0; overflow: visible; animation: none; }
   .web-mode .page-flow { padding: 0; }
   .web-mode .cover-header { padding: 0 0 6mm; background: #fff; }
