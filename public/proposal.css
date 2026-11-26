@@ -140,26 +140,10 @@ body.web-mode { background: var(--paper); }
 }
 
 /* The front cover: the designer's house picture on a page of its own (on for
-   new quotes). The picture has the Client / Project / Date / Revision labels;
-   the white boxes beside them are drawn here so they can widen to fit. Sizes
-   are in cqw (1% of the cover's width: 2.1 mm on paper), so it all scales on
-   screen; they're the boxes' positions in the designer's PDF, in points ÷ 5.9528. */
-.front-cover { position: relative; container-type: inline-size; break-after: page; background: #16161d; color: #16161d; }
+   new quotes). Just the picture; the client, project and date are on the next
+   page. */
+.front-cover { position: relative; break-after: page; background: #16161d; }
 .fc-art { display: block; width: 100%; height: auto; aspect-ratio: 2481 / 3508; }
-.fc-fields { margin: 0; }
-.fc-field {
-  position: absolute; left: 11.91cqw; height: 1.7cqw;
-  display: flex; align-items: center;
-  min-width: 19.08cqw; max-width: 43cqw; padding: 0 0.85cqw;
-  background: #fff;
-}
-.fc-client { top: 124.34cqw; }
-.fc-project { top: 126.81cqw; height: 1.71cqw; }
-.fc-date { top: 129.32cqw; }
-.fc-revision { top: 131.82cqw; }
-/* The labels are in the picture; these are for screen readers. */
-.fc-field dt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.fc-field dd { margin: 0; min-width: 0; font-size: 1.18cqw; font-weight: 500; line-height: 1.4; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* The cover details sit at the top of page 1 (page 2 after a front cover) */
 .cover-header { padding: 0 0 6mm; }
@@ -190,8 +174,6 @@ body.web-mode { background: var(--paper); }
 }
 .cover-meta > div { min-width: 0; }
 .cover-meta span { display: block; font-size: 7pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 1.5mm; }
-.cover-meta .investment-figure { font-weight: 600; color: var(--blue-ink); }
-.cover-meta small { color: var(--muted); font-size: 8pt; font-weight: 300; }
 
 /* ---- Body ----------------------------------------------------------------------- */
 
@@ -366,6 +348,9 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   body.web-mode { background: #fff; }
   .toolbar, .reply-banner, .respond-ui, .cover-mesh { display: none; }
   .print-only { display: block; }
+  .screen-only { display: none; }
+  /* Equipment & services starts on a page of its own. */
+  .block.equipment { break-before: page; }
   .web-mode .doc { width: auto; max-width: none; margin: 0; box-shadow: none; border-radius: 0; overflow: visible; animation: none; }
   .web-mode .page-flow { padding: 0; }
   .web-mode .cover-header { padding: 0 0 6mm; background: #fff; }

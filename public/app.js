@@ -2860,7 +2860,8 @@ const QuoteEditor = {
                 <option value="end">In one section after the areas</option>
               </select>
             </label>
-            <label class="check cover-option"><input type="checkbox" v-model="frontCover"> Front cover <small class="muted">(the house picture with client, project, date and revision; adds a page)</small></label>
+            <label class="check cover-option"><input type="checkbox" v-model="frontCover"> Front cover <small class="muted">(the house picture; adds a page)</small></label>
+            <label class="check"><input type="checkbox" v-model="quote.display.showSignature"> Signature boxes <small class="muted">(name, signature, date and PO at the end, for signing on paper; clients can always accept online)</small></label>
           </section>
 
           <section class="card">
@@ -3817,6 +3818,7 @@ const SettingsPage = {
         <label class="check"><input type="checkbox" v-model="s.display.showSku"> Manufacturer and model numbers</label>
         <label class="check"><input type="checkbox" v-model="s.display.showLabourDetail"> Labour under each item</label>
         <label class="check"><input type="checkbox" v-model="s.display.frontCover"> Front cover (the house picture)</label>
+        <label class="check"><input type="checkbox" v-model="s.display.showSignature"> Signature boxes (for signing on paper)</label>
       </div>
       <label class="inline-select">Labour
         <select v-model="s.display.labourPlacement">

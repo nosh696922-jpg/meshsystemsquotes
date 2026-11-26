@@ -272,8 +272,7 @@ Private stuff like the Habitech key goes in a file called `.env` in this folder
 - **Team notes** – a box on the right of every quote (under the profit panel,
   or near the bottom on a phone) for stuff only we need to know, like a gate
   code, parking or the best time to call. They never show on the proposal, PDF
-  or client link, editing them doesn't change the revision number, and going
-  back to an earlier version keeps today's notes. Duplicating a quote copies
+  or client link, and going back to an earlier version keeps today's notes. Duplicating a quote copies
   them over.
 - **Versions** – a version gets saved when you send the link and when the client
   replies, and you can save your own whenever. You can see what's changed since
@@ -285,17 +284,22 @@ Private stuff like the Habitech key goes in a file called `.env` in this folder
   (starting in Mesh blue) separates each area from the next. The **Investment
   summary** only shows the total ex VAT, the VAT and the total inc VAT, plus the
   whole-quote discount (e.g. “Package saving”) if there is one.
-- **Front cover** – new proposals start with our cover page (the house at night,
-  with the Client, Project, Date and Revision boxes filled in), then the title,
-  dates and price at the top of page 2. The boxes get wider for longer names.
-  **Revision** counts the different versions sent to the client: 1 for the
-  first, 2 once you change it (and send it again), and so on. Copying the link
-  again without changing anything doesn't count. To get a small quote onto
-  fewer pages, untick **Front cover** under **Pricing & terms → What the
+- **Page 2** – the title, then date, valid until and who prepared it (their
+  name as it's written on the quote, so use the full name, e.g. “Tim
+  Marsden”), then who it's for, the introduction and the scope. On paper,
+  **Equipment & services** always starts on a new page.
+- **Signature boxes** – off unless you tick them under **Pricing & terms → What
+  the proposal shows** (or in Settings for all new quotes). When they're on,
+  printed proposals and PDFs end with an Acceptance section (name, signature,
+  date, PO) for signing on paper. Clients can accept online either way.
+- **Front cover** – new proposals start with our cover page (the house at
+  night), then the title and dates at the top of page 2. To get a small quote
+  onto fewer pages, untick **Front cover** under **Pricing & terms → What the
   proposal shows**, or untick it in Settings for all new quotes. Quotes made
   before the front cover keep their old look. The picture,
   `public/img/proposal-cover.jpg`, was made from the designer's
-  `mesh-NewFC-210x297.pdf` (300 dpi, without its four white boxes).
+  `mesh-NewFC-210x297.pdf` (300 dpi). Its Client / Project / Date / Revision
+  boxes and labels were taken out in `v5.3`, since page 2 has the same details.
 - **Developer options** – search the secret word on the **Habitech** tab (in
   **Add product** or on the Products page) and a **Dev** page shows up on that
   computer, with an amber **Dev** link at the top. It shows which version's
@@ -402,6 +406,7 @@ Every release has a tag on GitHub (the repo's **Tags** list):
 | `v5` | **Low-margin warning** (lines below cost or under the margin in Settings get flagged, and Copy client link asks you to check them first) and **Cheaper supplier** (lines show when another supplier has the same part for less, with a Switch button that keeps the client's price). The README's rewritten too. Going back to `v4.9` removes both; lines you've already switched stay with their new supplier |
 | `v5.1` | **Logins** (everyone signs in with their own email and password; `TEAM_PASSWORD` becomes the owner key that adds and removes them) and **client pop-ups** (a note when a client opens or replies to a proposal while the app's open). Going back to `v5` means everyone signs in with the owner key again (the logins are kept for when you come forward) and the pop-ups stop |
 | `v5.2` | The site can't be shown inside another website's frame (stops lookalike pages tricking people into signing in), and the Windows program (version 1.1) opens the new address, `meshquotes.vercel.app`. Going back to `v5.1` allows framing again and puts back the program that opens the old address |
+| `v5.3` | Proposal tidy-up from the marked-up MESH-0002: the front cover is just the picture (no Client / Project / Date / Revision boxes), page 2 loses the Investment figure and the second “Prepared by” box, Equipment & services starts on a new page, and the signature boxes are off unless ticked. Going back to `v5.2` brings all of those back |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the
   deployment of the older version and click **⋯** → **Instant Rollback** (or
