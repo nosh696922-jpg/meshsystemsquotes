@@ -2075,7 +2075,7 @@ const QuoteEditor = {
       quote.display.labourPlacement ||= state.settings?.display?.labourPlacement || 'area';
       // Ticks added after the quote was made follow Settings, so the boxes
       // show what the proposal actually does.
-      const ticks = { onlineAccept: false, showSignature: false, breakEquipment: true, breakAreas: false, breakSummary: false };
+      const ticks = { onlineAccept: false, showSignature: false, breakEquipment: false, breakAreas: false, breakSummary: false, keepAreas: true };
       for (const [key, usual] of Object.entries(ticks)) {
         if (typeof quote.display[key] !== 'boolean') quote.display[key] = state.settings?.display?.[key] ?? usual;
       }
@@ -2216,7 +2216,7 @@ const QuoteEditor = {
     async openProposal(pdf) {
       const win = window.open('about:blank', '_blank');
       await this.saveNow();
-      const url = `/p/${this.quote.id}${pdf ? '/pdf' : ''}`;
+      const url = `/p/${this.quote.id}${pdf ? '/pdf' : '?preview'}`;
       if (win) win.location = url;
       else location.href = url;
     },
@@ -2909,11 +2909,12 @@ const QuoteEditor = {
             <label class="check"><input type="checkbox" v-model="quote.display.onlineAccept"> Online accept buttons <small class="muted">(the client can accept, ask for changes or decline from the link)</small></label>
             <label class="check"><input type="checkbox" v-model="quote.display.showSignature"> Signature boxes <small class="muted">(name, signature, date and PO at the end, for signing on paper)</small></label>
             <div class="page-breaks">
-              <div class="pb-title">New page before <small class="muted">(on paper and in PDFs; fewer ticks, fewer pages)</small></div>
+              <div class="pb-title">Pages <small class="muted">(on paper and in PDFs; check them with Preview proposal)</small></div>
               <div class="checks">
-                <label class="check"><input type="checkbox" v-model="quote.display.breakEquipment"> Equipment &amp; services</label>
-                <label class="check"><input type="checkbox" v-model="quote.display.breakAreas"> Each area <small class="muted">(after the first)</small></label>
-                <label class="check"><input type="checkbox" v-model="quote.display.breakSummary"> Investment summary</label>
+                <label class="check span-2"><input type="checkbox" v-model="quote.display.keepAreas"> Keep each area on one page <small class="muted">(it moves to the next page whole instead of splitting)</small></label>
+                <label class="check"><input type="checkbox" v-model="quote.display.breakEquipment"> New page before Equipment &amp; services</label>
+                <label class="check"><input type="checkbox" v-model="quote.display.breakAreas"> New page before each area <small class="muted">(after the first)</small></label>
+                <label class="check"><input type="checkbox" v-model="quote.display.breakSummary"> New page before the Investment summary</label>
               </div>
             </div>
           </section>
@@ -3876,11 +3877,12 @@ const SettingsPage = {
         <label class="check"><input type="checkbox" v-model="s.display.showSignature"> Signature boxes (for signing on paper)</label>
       </div>
       <div class="page-breaks">
-        <div class="pb-title">New page before <small class="muted">(on paper and in PDFs)</small></div>
+        <div class="pb-title">Pages <small class="muted">(on paper and in PDFs)</small></div>
         <div class="checks">
-          <label class="check"><input type="checkbox" v-model="s.display.breakEquipment"> Equipment &amp; services</label>
-          <label class="check"><input type="checkbox" v-model="s.display.breakAreas"> Each area <small class="muted">(after the first)</small></label>
-          <label class="check"><input type="checkbox" v-model="s.display.breakSummary"> Investment summary</label>
+          <label class="check span-2"><input type="checkbox" v-model="s.display.keepAreas"> Keep each area on one page</label>
+          <label class="check"><input type="checkbox" v-model="s.display.breakEquipment"> New page before Equipment &amp; services</label>
+          <label class="check"><input type="checkbox" v-model="s.display.breakAreas"> New page before each area</label>
+          <label class="check"><input type="checkbox" v-model="s.display.breakSummary"> New page before the Investment summary</label>
         </div>
       </div>
       <label class="inline-select">Labour

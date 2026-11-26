@@ -349,6 +349,12 @@ table.items tfoot td { padding: 3mm 0 0; border: none; }
   .toolbar, .reply-banner, .respond-ui, .cover-mesh { display: none; }
   .print-only { display: block; }
   .screen-only { display: none; }
+  /* "Keep each area on one page": an area moves to the next page whole if it
+     won't fit (one taller than a page still splits). */
+  .keep-areas .area { break-inside: avoid; }
+  /* An area's total prints once, at its end (a table footer would repeat on
+     every page the area runs over). */
+  table.items tfoot { display: table-row-group; }
   /* New pages, as ticked on the quote (lib/proposal.js adds the classes). */
   .pb-equipment .block.equipment { break-before: page; }
   .pb-areas .area + .area { break-before: page; margin-top: 0; padding-top: 0; border-top: none; }

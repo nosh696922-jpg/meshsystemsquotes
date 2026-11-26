@@ -292,12 +292,19 @@ Private stuff like the Habitech key goes in a file called `.env` in this folder
 - **Page 2** – the title, then date, valid until and who prepared it (their
   name as it's written on the quote, so use the full name, e.g. “Tim
   Marsden”), then who it's for, the introduction and the scope.
-- **Page breaks** – under **Pricing & terms → What the proposal shows**, tick
-  where printed proposals and PDFs start a new page: before **Equipment &
-  services** (ticked as usual), before **each area** after the first, and
-  before the **Investment summary**. Fewer ticks means fewer pages. Settings
-  has the same ticks for new quotes. They don't change the online link, which
-  is one long page.
+- **Pages** – under **Pricing & terms → What the proposal shows**:
+  **Keep each area on one page** (ticked as usual: an area that won't fit
+  moves to the next page whole instead of splitting; untick it to fill the
+  pages up), and **New page before** Equipment & services, each area after the
+  first, or the Investment summary (all off as usual). Each area's total
+  prints once, at its end. Settings has the same ticks for new quotes. They
+  only change paper and PDFs; the online link is one long page.
+- **Preview proposal** – shows the proposal on A4 sheets exactly as it prints
+  (cover, page breaks, footer and page numbers), with **Print** and **Download
+  PDF** along the top, so you can try the ticks above and see the pages
+  before sending. It uses Paged.js (`public/vendor/paged.polyfill.min.js`,
+  v0.4.3, MIT licence), which lays the printed version out on pages in the
+  browser.
 - **Signature boxes** – off unless you tick them under **Pricing & terms → What
   the proposal shows** (or in Settings for all new quotes). When they're on,
   printed proposals and PDFs end with an Acceptance section (name, signature,
@@ -366,6 +373,7 @@ Private stuff like the Habitech key goes in a file called `.env` in this folder
 | `lib/pdf.js` | One-click PDF via Edge/Chrome (only on your own computer) |
 | `public/app.js`, `public/styles.css` | The quoting app itself |
 | `public/shared/calc.js` | The pricing maths, shared by the app and the proposal |
+| `public/vendor/paged.polyfill.min.js` | Paged.js 0.4.3 (MIT), for the page-by-page Preview proposal |
 | `public/shared/mesh-nodes.js` | The moving nodes at the top of each page and on the sign-in page |
 | `public/manifest.webmanifest`, `public/img/app-icon-*.png` | Lets the site be installed as an app (name, icon, own window) |
 | `desktop/` | The Windows program: `MeshQuotes.cs`, its icon, and `build.ps1`, which builds `public/download/MeshQuotes.exe` |
@@ -418,6 +426,7 @@ Every release has a tag on GitHub (the repo's **Tags** list):
 | `v5.2` | The site can't be shown inside another website's frame (stops lookalike pages tricking people into signing in), and the Windows program (version 1.1) opens the new address, `meshquotes.vercel.app`. Going back to `v5.1` allows framing again and puts back the program that opens the old address |
 | `v5.3` | Proposal tidy-up from the marked-up MESH-0002: the front cover is just the picture (no Client / Project / Date / Revision boxes), page 2 loses the Investment figure and the second “Prepared by” box, Equipment & services starts on a new page, and the signature boxes are off unless ticked. Going back to `v5.2` brings all of those back |
 | `v5.4` | No online accept for now: the client link has no Accept / Request changes / Decline buttons (and the server turns replies away) unless **Online accept buttons** is ticked on the quote. Also, catalogue tabs can be hidden (**⋯** or **More** → **Arrange or hide tabs**, untick a tab), and page-break ticks (new page before Equipment & services, each area, the Investment summary). Going back to `v5.3` brings the buttons back on every proposal, shows every tab again (the hidden list is kept, just ignored) and puts Equipment & services back to always starting a new page |
+| `v5.5` | **Preview proposal** shows real A4 pages, the same as the PDF, and the new **Keep each area on one page** tick (on as usual); Equipment & services no longer starts a new page unless ticked, and area totals print once. Going back to `v5.4` makes Preview the long online page again and lets areas split |
 
 - **Quickest, in Vercel:** open the project → **Deployments**, find the
   deployment of the older version and click **⋯** → **Instant Rollback** (or
